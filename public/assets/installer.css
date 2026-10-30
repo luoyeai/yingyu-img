@@ -1,0 +1,206 @@
+:root {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-synthesis: none;
+    font-size: 14px;
+    line-height: 1.65;
+    color: #18181b;
+    background: #f9fafb;
+    --accent: #18181b;
+    --muted: #71717a;
+    --line: #ededf0;
+    --surface: #fafafa;
+    --danger: #b4233b;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100svh; display: flex; align-items: center; justify-content: center; padding: 40px 24px; -webkit-font-smoothing: antialiased; }
+a { color: var(--accent); text-decoration: none; }
+h1, h2, p { margin-top: 0; }
+h1 { margin-bottom: 8px; font-size: 24px; font-weight: 700; line-height: 1.4; letter-spacing: -.5px; }
+h2 { margin-bottom: 10px; font-size: 14px; font-weight: 600; line-height: 1.5; }
+p { margin-bottom: 16px; }
+button, input { font: inherit; }
+button, a, input, summary { touch-action: manipulation; }
+button, a { -webkit-tap-highlight-color: transparent; }
+button { cursor: pointer; }
+button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid #71717a; outline-offset: 4px; }
+input:not([type=checkbox]) { width: 100%; min-height: 46px; border: 1px solid transparent; border-radius: 12px; padding: 11px 15px; background: #f5f6f8; color: #27272a; line-height: 1.5; transition: background .15s, border-color .15s; }
+input:not([type=checkbox]):hover { border-color: #e4e4e7; }
+input:not([type=checkbox]):focus { border-color: #a1a1aa; background: #fff; outline: 2px solid #e4e4e7; outline-offset: 1px; }
+input::placeholder { color: #94949e; }
+input[type=checkbox] { width: 18px; height: 18px; margin: 3px 0 0; flex-shrink: 0; accent-color: var(--accent); }
+input:disabled { color: #94949e; }
+label { font-size: 14px; font-weight: 600; }
+
+.installer-shell { width: 100%; max-width: 1024px; }
+.installer-panel { overflow: hidden; background: #fff; border: 1px solid #f0f0f2; border-radius: 24px; box-shadow: 0 12px 50px -24px #18181b15; }
+.installer-header { display: flex; align-items: center; justify-content: space-between; gap: 32px; min-height: 90px; padding: 24px 32px; border-bottom: 1px solid var(--line); }
+.brand { display: flex; align-items: center; gap: 11px; flex-shrink: 0; }
+.brand-mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: var(--accent); color: #fff; }
+.brand-mark svg { width: 25px; height: 25px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.brand-copy { display: grid; gap: 3px; }
+.brand-copy strong { font-size: 16px; line-height: 1.3; letter-spacing: 1px; }
+.brand-copy > span { font-size: 10px; line-height: 1.4; color: var(--muted); letter-spacing: 1.5px; }
+.header-label { font-size: 12px; color: var(--muted); }
+.installation-progress { min-width: 0; }
+.installation-progress ol { display: flex; align-items: center; list-style: none; padding: 0; margin: 0; }
+.installation-progress li { display: flex; align-items: center; gap: 7px; color: #8d8d97; font-size: 12px; white-space: nowrap; }
+.installation-progress li:not(:last-child)::after { content: ""; width: 20px; height: 1px; margin: 0 10px; background: #e4e4e7; }
+.step-number { display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid transparent; border-radius: 50%; background: #f4f4f5; font-size: 10px; font-weight: 600; flex-shrink: 0; }
+.step-number svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.step-label-short { display: none; }
+.installation-progress .is-current { color: var(--accent); font-weight: 600; }
+.is-current .step-number { border: 2px solid var(--accent); background: #fff; }
+.installation-progress .is-complete { color: #52525b; }
+.is-complete .step-number { color: #fff; background: var(--accent); }
+.step-content { width: 100%; min-height: 520px; padding: 36px 40px 40px; margin: 0 auto; }
+.step-database .step-content, .step-site .step-content { max-width: 800px; }
+.step-confirm .step-content { max-width: 880px; }
+.step-complete .step-content, .step-blocked .step-content, .step-failed .step-content { max-width: 760px; padding-top: 44px; }
+.page-heading { margin-bottom: 28px; }
+.page-heading > p { max-width: 700px; margin: 0; font-size: 14px; color: var(--muted); line-height: 1.8; }
+
+.environment-overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 24px; }
+.overview-card { display: flex; flex-direction: column; justify-content: center; gap: 6px; min-width: 0; min-height: 114px; padding: 17px 20px; border-radius: 12px; background: var(--surface); }
+.overview-label { font-size: 12px; color: var(--muted); }
+.overview-value { display: flex; align-items: baseline; gap: 6px; }
+.overview-value strong { font: 600 36px/1.2 ui-sans-serif, system-ui, sans-serif; letter-spacing: -1.5px; }
+.overview-value > span { color: #b4b4bc; font-size: 14px; }
+.overview-stat { font-size: 18px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.overview-stat > span { font-size: 12px; font-weight: 400; color: var(--muted); }
+.overview-caption { font-size: 11px; color: var(--muted); }
+.overview-primary { background: var(--accent); color: #fff; }
+.overview-primary .overview-label { color: #c2c2ca; }
+.environment-decision { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 28px; }
+.check-summary { position: relative; padding-left: 15px; display: grid; gap: 3px; }
+.check-summary::before { content: ""; width: 6px; height: 6px; border-radius: 50%; position: absolute; left: 0; top: 9px; background: #278160; }
+.check-summary strong { font-size: 14px; font-weight: 600; }
+.check-summary > span { font-size: 12px; color: var(--muted); }
+.summary-waiting::before { background: #c07819; }
+.summary-waiting strong { color: #966016; }
+.environment-actions { flex-shrink: 0; }
+.environment-actions .form-actions { margin-top: 0; }
+.problem-checks { margin-bottom: 22px; }
+.problem-checks > h2 { margin-bottom: 12px; }
+.environment-checks { list-style: none; padding: 0; margin: 0; border-radius: 12px; background: var(--surface); }
+.environment-check { padding: 16px 18px; }
+.environment-check:not(:last-child) { border-bottom: 1px solid #e9e9ed; }
+.check-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 6px; }
+.check-heading h2 { margin: 0; font-size: 13px; }
+.check-status { flex-shrink: 0; font-size: 11px; color: #287451; background: #eaf5ee; padding: 2px 8px; border-radius: 5px; }
+.check-fail .check-status { color: var(--danger); background: #fcecf0; }
+.check-warning .check-status { color: #9b6414; background: #fcf1df; }
+.environment-check p { margin: 0 0 5px; color: #64646e; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.environment-check .check-fix { color: #7c6342; }
+.requirement-label { display: block; font-size: 11px; color: var(--muted); }
+.passed-checks { border: 1px solid var(--line); border-radius: 12px; }
+.passed-checks summary { cursor: pointer; padding: 15px 18px; font-size: 13px; font-weight: 500; color: #52525b; }
+.passed-checks[open] summary { border-bottom: 1px solid var(--line); }
+.passed-checks .environment-checks { background: #fff; }
+
+.installation-form { display: grid; gap: 18px; }
+.field { display: grid; gap: 8px; align-content: start; }
+.field-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 20px; }
+.field-hint { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.8; }
+.installation-form > .field-hint { margin-top: -10px; }
+.form-actions { display: flex; align-items: center; gap: 14px; margin-top: 14px; flex-wrap: wrap; }
+.button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; gap: 8px; padding: 11px 22px; border: 1px solid #e4e4e7; border-radius: 999px; background: #fff; color: #52525b; font-size: 13px; font-weight: 500; line-height: 1.5; white-space: nowrap; transition: background .15s, border-color .15s; }
+.button:hover:not(:disabled) { background: #f4f4f5; border-color: #d4d4d8; color: #18181b; }
+.button.primary { color: #fff; border-color: var(--accent); background: var(--accent); }
+.button.primary:hover:not(:disabled) { color: #fff; background: #333338; border-color: #333338; }
+.button:disabled { cursor: not-allowed; background: #f4f4f5; border-color: #f4f4f5; color: #94949e; }
+.button.is-loading { cursor: wait; }
+.button.is-loading::before { content: ""; width: 13px; height: 13px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
+.action-hint { color: var(--muted); font-size: 12px; }
+.notice { padding: 15px 18px; margin-bottom: 24px; border: 1px solid var(--line); border-radius: 12px; font-size: 13px; line-height: 1.85; overflow-wrap: anywhere; }
+.notice-info { color: #64646e; background: var(--surface); }
+.notice-error { color: var(--danger); background: #fff5f6; border-color: #f5dce1; }
+.notice p { margin: 5px 0 0; }
+.notice ul { padding-left: 18px; margin: 6px 0 0; }
+.form-divider { padding-top: 22px; border-top: 1px solid var(--line); margin-top: 4px; }
+.form-divider h2 { margin-bottom: 4px; }
+.form-divider p { margin: 0; font-size: 12px; color: var(--muted); }
+.section-title { margin-bottom: 14px; }
+.configuration-summary { margin: 0 0 24px; padding: 5px 20px; border-radius: 12px; background: var(--surface); }
+.configuration-summary > div { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 24px; padding: 12px 0; font-size: 13px; }
+.configuration-summary > div:not(:last-child) { border-bottom: 1px solid #e9e9ed; }
+.configuration-summary dt { color: var(--muted); }
+.configuration-summary dd { margin: 0; overflow-wrap: anywhere; }
+.muted { color: var(--muted); }
+.confirmation-checkbox { display: flex; align-items: flex-start; gap: 11px; font-size: 13px; line-height: 1.8; font-weight: 400; }
+.result-symbol { display: grid; place-items: center; width: 56px; height: 56px; margin-bottom: 24px; border-radius: 16px; }
+.result-symbol svg { width: 30px; height: 30px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.result-success { color: #fff; background: var(--accent); }
+.result-warning { color: #966016; background: #fcf1df; }
+.completion-note, .blocked-note { font-size: 13px; color: #64646e; line-height: 1.9; }
+.recovery-guide { padding: 20px; border-radius: 12px; background: var(--surface); }
+.recovery-guide > p:not(.field-hint) { margin-bottom: 12px; color: #64646e; font-size: 13px; }
+.blocked-note { margin: 20px 0 0; }
+.submission-status { font-size: 12px; color: #52525b; margin: 20px 0 0; }
+.submission-status[hidden] { display: none; }
+.no-script-note { font-size: 12px; color: var(--muted); margin: 20px 0 0; }
+.installer-footer { display: flex; justify-content: space-between; gap: 20px; padding: 18px 32px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.preflight-overview { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.preflight-summary { margin-bottom: 24px; }
+.preflight-panel .step-content { min-height: 520px; }
+.preflight-panel .completion-note { margin-top: 20px; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 800px) {
+    .installer-header { gap: 24px; padding: 22px 26px; }
+    .installation-progress li { gap: 5px; font-size: 11px; }
+    .installation-progress li:not(:last-child)::after { width: 10px; margin: 0 6px; }
+    .step-content { padding: 30px; }
+    .overview-card { padding: 16px; }
+    .overview-stat { font-size: 16px; }
+}
+
+@media (max-width: 700px) {
+    body { display: block; padding: 16px 12px; }
+    .installer-panel { border-radius: 20px; }
+    .installer-header { flex-wrap: wrap; gap: 24px; padding: 22px 20px; }
+    .brand-mark { width: 34px; height: 34px; }
+    .brand-copy strong { font-size: 15px; }
+    .installation-progress { flex: 1 0 100%; }
+    .installation-progress ol { justify-content: space-between; }
+    .installation-progress li { flex-direction: column; gap: 7px; position: relative; font-size: 11px; min-width: 38px; }
+    .installation-progress li:not(:last-child)::after { position: absolute; top: 11px; left: calc(100% + 6px); width: 19px; margin: 0; }
+    .step-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .step-label-short { display: inline; }
+    .step-content, .step-complete .step-content, .step-blocked .step-content, .step-failed .step-content { min-height: 0; padding: 26px 20px 30px; }
+    h1 { font-size: 22px; }
+    .page-heading { margin-bottom: 24px; }
+    .page-heading > p { font-size: 13px; }
+    .environment-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 22px; }
+    .overview-card { min-height: 105px; padding: 15px; gap: 5px; }
+    .overview-label { font-size: 11px; }
+    .overview-value strong { font-size: 32px; }
+    .overview-value > span { font-size: 13px; }
+    .overview-stat { font-size: 17px; }
+    .overview-caption { font-size: 10px; }
+    .environment-decision { align-items: stretch; flex-direction: column; gap: 18px; margin-bottom: 26px; }
+    .check-summary > span { font-size: 12px; }
+    .environment-actions .form-actions { gap: 10px; }
+    .environment-check { padding: 14px; }
+    .check-heading { gap: 12px; }
+    .check-heading h2 { font-size: 13px; }
+    .environment-check p { font-size: 12px; }
+    .passed-checks summary { padding: 15px 14px; font-size: 12px; }
+    .field-grid { grid-template-columns: 1fr; gap: 18px; }
+    .form-actions { align-items: flex-start; gap: 12px; }
+    .form-actions > .button { width: 100%; }
+    .notice { padding: 14px 15px; font-size: 12px; }
+    .configuration-summary { padding: 4px 15px; }
+    .configuration-summary > div { grid-template-columns: 90px minmax(0, 1fr); gap: 12px; font-size: 12px; }
+    .confirmation-checkbox { font-size: 12px; }
+    .recovery-guide { padding: 17px; }
+    .installer-footer { padding: 16px 20px; gap: 12px; font-size: 10px; }
+    .preflight-overview .overview-primary { grid-column: 1 / -1; min-height: 98px; }
+    .preflight-panel .step-content { min-height: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    input:not([type=checkbox]), .button { transition: none; }
+    .button.is-loading::before { animation: none; }
+}

@@ -1,0 +1,24 @@
+<section class="panel settings-section full-width"><h2>图片存储</h2><p class="caption">默认存储仅影响新上传；每批可单独选择。历史图片保留原配置与链接。云端只保存公开 WebP，预览、原图和停用副本继续保存在本站私有目录。</p>
+<form method="post" action="{{ route('storage.default') }}" class="inline-form">@csrf @method('PUT')<label>默认上传目标<select name="storage_configuration_id">@foreach($storages->where('enabled',true) as $storage)<option value="{{ $storage->id }}" @selected($defaultStorageId==$storage->id)>{{ $storage->name }} · {{ strtoupper($storage->driver) }}</option>@endforeach</select></label><button class="button" type="submit">设为默认</button></form>
+<p class="info-note">云端停用会先下载并校验完整 WebP，再删除源站对象；恢复时重新上传。CDN、浏览器或第三方保存的副本无法立即撤回，需要在服务商控制台清理缓存。云端回收站仍保留外链，满 30 天再由计划任务删除。</p>
+@if($pendingOperations)<form method="post" action="{{ route('storage.retry') }}" class="inline-form">@csrf<p>有 {{ $pendingOperations }} 项未完成存储操作；相关图片暂时锁定。任务会由清理计划重试。</p><button class="button" type="submit">立即重试存储操作</button></form>@endif
+@foreach($storages as $storage)
+<details class="settings-section"><summary>{{ $storage->name }} · {{ strtoupper($storage->driver) }}{{ $defaultStorageId==$storage->id ? ' · 默认' : '' }}{{ !$storage->enabled ? ' · 已停用新上传' : '' }} · {{ $storage->images_count }} 张</summary>
+@php($usage=$storageStats->get($storage->id))
+<p class="caption">WebP 记录体积 {{ $formatBytes($usage?->webp_bytes ?? 0) }}；本地预览与原图 {{ $formatBytes($usage?->private_bytes ?? 0) }}。停用的云图另占本站完整 WebP 副本；未完成操作可能暂有额外副本。</p>
+@if($storage->driver!=='local')<p class="caption">{{ $storage->bucket }} · {{ $storage->region }} · {{ $storage->prefix ?: '无前缀' }}<br>{{ $storage->public_url }}<br>桶、地域、Endpoint、前缀及公开域名固定；变更请创建新配置，避免历史链接改变。</p>@endif
+<form method="post" action="{{ route('storage.update',$storage) }}" class="stack-form">@csrf @method('PUT')<div class="form-columns"><label>名称<input name="name" required maxlength="100" value="{{ $storage->name }}"></label><label>新上传<select name="enabled"><option value="1" @selected($storage->enabled)>允许</option><option value="0" @selected(!$storage->enabled)>停用</option></select></label></div>
+@if($storage->driver!=='local')<div class="form-columns"><label>轮换 Access Key<input type="password" name="access_key" autocomplete="new-password" maxlength="255" placeholder="留空保留现有密钥"></label><label>轮换 Secret Key<input type="password" name="secret_key" autocomplete="new-password" maxlength="255" placeholder="留空保留现有密钥"></label></div>@endif<button type="submit" class="button small">保存配置</button></form>
+@if($storage->driver!=='local')<div class="inline-form"><form method="post" action="{{ route('storage.test',$storage) }}">@csrf<button class="button small" type="submit">测试读写与公开访问</button></form><form method="post" action="{{ route('storage.destroy',$storage) }}" data-confirm="删除未被引用的存储配置？不会删除桶。">@csrf @method('DELETE')<button class="text-button danger" type="submit">删除配置</button></form></div>@endif
+</details>
+@endforeach
+<details class="settings-section"><summary>添加云存储</summary><form method="post" action="{{ route('storage.store') }}" class="stack-form">@csrf
+<div class="form-columns"><label>名称<input name="name" required maxlength="100" placeholder="例如：网站图片 COS"></label><label>类型<select name="driver"><option value="cos">腾讯云 COS</option><option value="oss">阿里云 OSS</option><option value="s3">通用 S3</option></select></label></div>
+<div class="form-columns"><label>存储桶<input name="bucket" required maxlength="100" placeholder="COS 需包含 -APPID"></label><label>地域<input name="region" required maxlength="80" placeholder="COS: ap-guangzhou / OSS: cn-hangzhou"></label></div>
+<label>S3 Endpoint<input name="endpoint" type="url" maxlength="255" placeholder="https://s3.example.com"><span class="caption">仅通用 S3 需要填写。COS、OSS 使用地域对应的官方公网服务。支持公网 HTTPS 自定义 S3 地址及端口，拒绝内网、回环与重定向。</span></label>
+<div class="form-columns"><label>对象前缀<input name="prefix" maxlength="180" placeholder="例如 images（可留空）"></label><label>公开域名<input name="public_url" type="url" required maxlength="255" placeholder="https://cdn.example.com"><span class="caption">填写桶公开域名或 CDN 根域名，不含对象前缀。</span></label></div>
+<label class="checkbox-label"><input name="path_style" type="checkbox" value="1">通用 S3 使用路径寻址（COS 固定虚拟主机寻址）</label>
+<div class="form-columns"><label>Access Key / SecretId<input type="password" name="access_key" required autocomplete="new-password" maxlength="255"></label><label>Secret Key<input type="password" name="secret_key" required autocomplete="new-password" maxlength="255"></label></div>
+<label class="checkbox-label"><input name="bucket_confirmed" type="checkbox" value="1" required>确认该桶未启用过版本控制、对象锁或保留策略</label><p class="caption">第一阶段只支持普通单版本桶；需要对象读写删除及查询桶版本、对象锁/保留状态的权限。连接测试仅操作前缀下的随机 _checks 路径。COS 使用官方 S3 兼容接口，通用 S3 服务需逐项测试。</p>
+<button class="button primary" type="submit">添加配置</button></form></details>
+<p class="caption">密钥使用本站 APP_KEY 加密且不回显。灾备必须同时保存数据库、原 APP_KEY（轮换时包括必要旧密钥）和私有媒体；不要重新生成 APP_KEY。新配置不会搬迁历史媒体。</p></section>

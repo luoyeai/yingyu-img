@@ -22,7 +22,7 @@ TREES = {
     'routes': {'.php'}, 'public/assets': {'.css', '.js', '.webp'},
 }
 FILES = [
-    '.env.example', 'artisan', 'composer.json', 'composer.lock',
+    '.env.example', 'artisan', 'composer.json', 'composer.lock', 'LICENSE',
     'bootstrap/app.php', 'bootstrap/providers.php', 'bootstrap/preflight.php',
     'bootstrap/installation.php', 'bootstrap/update-gateway.php', 'bootstrap/update-public.pem',
     'bootstrap/update-legacy.json', 'public/index.php',
@@ -91,7 +91,7 @@ def verify_tree(root: Path, lock: dict) -> dict:
             value = match.group(1).strip().strip(b'\'"')
             if value:
                 raise RuntimeError(f'Embedded environment secret detected in {relative}; no value printed.')
-        if re.search(rb'/(?:Volumes|Users)/', body):
+        if re.search(rb"/(?:Volumes|Users)/[^/\s'\"<>]+/", body):
             raise RuntimeError(f'Local machine path detected: {relative}')
     return installed
 

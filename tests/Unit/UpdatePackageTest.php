@@ -43,12 +43,13 @@ class UpdatePackageTest extends TestCase
 
     public function test_valid_signed_package_is_extracted_and_private_state_is_atomic_and_locked(): void
     {
-        $path = $this->package(['app/example.php' => '<?php echo "fixture";']);
+        $path = $this->package(['app/example.php' => '<?php echo "fixture";', 'LICENSE' => 'MIT fixture']);
         $package = new UpdatePackage($this->root);
         $manifest = $package->inspect($path, $this->current());
         $this->assertSame('1.2.0', $manifest['program']);
         $extracted = $package->extract($path, $this->root.'/stage', $this->current());
         $this->assertSame('<?php echo "fixture";', file_get_contents($extracted['payload'].'/app/example.php'));
+        $this->assertSame('MIT fixture', file_get_contents($extracted['payload'].'/LICENSE'));
         $this->assertSame(0600, fileperms($extracted['payload'].'/app/example.php') & 0777);
         $state = new UpdateState($this->root);
         $state->write('version.json', $this->current() + ['managed_files' => ['app/example.php']]);

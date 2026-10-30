@@ -6,6 +6,48 @@ use PHPUnit\Framework\TestCase;
 
 class UpdateBuildTest extends TestCase
 {
+    public function test_release_scan_accepts_sdk_user_endpoints_and_rejects_local_machine_paths(): void
+    {
+        $program = <<<'PYTHON'
+import importlib.util
+import json
+from pathlib import Path
+import sys
+import tempfile
+
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location('vault_release_builder', sys.argv[1])
+builder = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(builder)
+with tempfile.TemporaryDirectory(prefix='vault-release-scan-test-') as directory:
+    root = Path(directory)
+    for relative in builder.EMPTY_DIRS:
+        (root / relative).mkdir(parents=True, exist_ok=True)
+    metadata = root / 'vendor/composer/installed.json'
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text(json.dumps({'packages': [], 'dev': False}))
+    fixture = root / 'endpoint.php'
+    fixture.write_text("<?php return '/Users/CreateUser';")
+    lock = {'packages': [], 'packages-dev': []}
+    assert builder.verify_tree(root, lock) == {}
+    for path in ['/Users/example/project/app.php', '/Volumes/example/project/app.php']:
+        fixture.write_text(path)
+        try:
+            builder.verify_tree(root, lock)
+            raise AssertionError('Local machine path was accepted')
+        except RuntimeError as failure:
+            assert 'Local machine path detected' in str(failure)
+PYTHON;
+        $process = proc_open(['python3', '-c', $program, dirname(__DIR__, 2).'/bin/build-release.py'], [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes);
+        $this->assertIsResource($process);
+        fclose($pipes[0]);
+        $output = stream_get_contents($pipes[1]);
+        $error = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $this->assertSame(0, proc_close($process), $output.$error);
+    }
+
     public function test_signing_build_publishes_only_complete_archives_and_can_retry_after_write_failure(): void
     {
         $program = <<<'PY'

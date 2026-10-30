@@ -85,7 +85,7 @@ class UpdatePackage
         if (! self::canonicalPath($path)) {
             return false;
         }
-        if (in_array($path, ['.env.example', 'artisan', 'composer.json', 'composer.lock', 'release.json', 'BUILD.json', 'FILES.sha256', 'README.md', 'public/index.php', 'public/robots.txt'], true)) {
+        if (in_array($path, ['.env.example', 'artisan', 'composer.json', 'composer.lock', 'release.json', 'BUILD.json', 'FILES.sha256', 'README.md', 'LICENSE', 'public/index.php', 'public/robots.txt'], true)) {
             return true;
         }
         foreach (['app/', 'config/', 'lang/', 'database/migrations/', 'resources/views/', 'routes/', 'bootstrap/', 'vendor/', 'public/assets/', 'deploy/', 'docs/'] as $prefix) {

@@ -2,8 +2,6 @@
 
 面向个人的中文 WebP 图床，提供图片上传、整理、外链和多存储管理。
 
-作者：[Luoye](https://luoyeai.cn) · 许可证：[MIT](LICENSE)
-
 当前功能基线为 **1.1.4**。本仓库提供源码，不包含生产依赖、运行配置、图片、数据库、签名私钥或历史发行包。源码整理不代表生产站已升级。
 
 ## 功能
@@ -48,33 +46,6 @@ php artisan vault:cleanup
 # 只读检查记录、文件体积与孤立文件
 php artisan vault:audit
 ```
-
-## 开发与测试
-
-```sh
-composer install
-cp .env.testing.example .env.testing
-# 在本机安全填写独立测试账号，并生成测试专用 APP_KEY
-php artisan key:generate --env=testing --no-interaction
-```
-
-测试配置仅允许 **`127.0.0.1:13368 / image_vault_test`**，必须与业务库隔离。使用只拥有测试库权限的账号。Feature 测试会重建测试表；不要将业务数据放入测试库。
-
-```sh
-# 已配置 Imagick 的通用 PHP 环境
-php vendor/bin/phpunit tests/Feature/UploadResponseTest.php
-php vendor/bin/phpunit tests/Unit/UploadAssetTest.php
-node --check public/assets/upload.js
-
-# 原开发机的独立 Imagick 包装器和测试入口
-# 若下载或解压工具未保留执行权限，先运行以下命令
-chmod +x bin/php-local bin/test bin/mysql-local bin/nginx-local
-bin/test tests/Unit/UploadAssetTest.php
-```
-
-`bin/php-local` 加载 `.tools/runtime/extensions/imagick.so`，`IMAGE_VAULT_PHP_BIN` 可指定 PHP；这些本机运行材料不在仓库中。`bin/mysql-local` / `bin/nginx-local` 仅管理已初始化的本机环境，不能代替通用安装流程。
-
-部分安装、数据库快照和更新集成测试依赖原开发机的独立 MySQL 管理夹具；部分发行验收测试还依赖 `release/` 内的历史包。干净源码检出不包含这些材料，不能直接视为完整集成测试环境。不要用生产管理员凭据补齐测试夹具。
 
 ## 目录
 

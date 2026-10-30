@@ -24,7 +24,7 @@ TREES = {
     'app': {'.php'}, 'config': {'.php'}, 'database': {'.php', '.gitignore'},
     'lang': {'.php'}, 'routes': {'.php'}, 'resources': {'.php', '.css', '.js'},
     'public/assets': {'.css', '.js', '.webp'}, 'tests': {'.php', '.cjs'},
-    'deploy': {'.md', '.conf', '.example'},
+    'deploy': {'.md', '.conf', '.example'}, 'docs/screenshots': {'.webp'},
 }
 SCRIPTS = (
     'php-local', 'mysql-local', 'nginx-local', 'test', 'router.php',

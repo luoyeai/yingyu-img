@@ -4,6 +4,18 @@
 
 当前版本：**1.0.0**。完整安装包请到 [Releases](https://github.com/luoyeai/yingyu-img/releases) 下载。
 
+**图片上传**：拖入图片或整个文件夹，自动转换为 WebP，可调整质量和尺寸、导出上传记录。
+
+![图片上传界面](docs/screenshots/upload.webp)
+
+**图片管理**：按名称、分组和日期查找图片，支持批量整理、复制外链与编辑图片信息。
+
+![图片库界面（示例图片）](docs/screenshots/library.webp)
+
+**管理员登录**：独立的个人图片工作室，仅管理员可登录，不开放注册。
+
+![管理员登录界面](docs/screenshots/login.webp)
+
 ## 功能
 
 - 单管理员、禁止公开注册，支持登录限流、CSRF 防护与密码修改。
@@ -23,29 +35,71 @@
 - MySQL **8.0+**、Nginx，PHP CLI 与 FPM 使用一致的版本和扩展。
 - Imagick / ImageMagick 具备 WebP 编解码能力。
 - PHP 扩展：`ctype`、`curl`、`dom` / `xml`、`exif`、`fileinfo`、`filter`、`hash`、`iconv`、`imagick`、`json`、`mbstring`、`openssl`、`PDO`、`pdo_mysql`、`session`、`tokenizer`；依赖安装和更新解压还需 `zip` / `unzip`。
-- 从源码安装需要 Composer 2。
 
-## 从源码安装
+## 安装教程（Release 完整包）
 
-以下步骤只适用于新站和专用空数据库。已有站点应先备份并使用兼容的更新流程。
+### 1. 下载安装包
 
-```sh
-composer install --no-dev --prefer-dist --optimize-autoloader
-composer check-platform-reqs --no-dev
+在 [Releases](https://github.com/luoyeai/yingyu-img/releases/latest) 下载 **`yingyu-img-1.0.0.zip`**。完整包已包含生产依赖，无需安装 Composer 或 Node。GitHub 自动生成的 `Source code` 是源码包，请选择上面的完整安装包。
+
+### 2. 宝塔创建网站
+
+1. 安装 Nginx、PHP **8.4.1+** 和 MySQL **8.0+**，为本站创建一个专用空数据库。
+2. 添加网站并绑定域名，上传安装包，将 `image-vault/` 内的全部文件解压到网站目录。例如网站目录为 `/www/wwwroot/yingyu-img/`，其中应直接包含 `app/`、`public/` 和 `vendor/`。
+3. 在“网站 → 设置 → 网站目录”中，将运行目录设为 **`/public`**；PHP 版本选择 **8.4**，配置域名证书并启用 HTTPS。
+4. 安装并启用 Imagick（支持 WebP）、`pdo_mysql` 等所需扩展，确保 PHP CLI 与网站 PHP 的版本和扩展一致。其他缺项按安装页提示处理。
+
+### 3. 设置伪静态
+
+打开“网站 → 设置 → 伪静态”，粘贴以下完整内容并保存。保留宝塔默认 PHP 配置，不要将整份 Nginx `server` 配置粘贴到这里。
+
+```nginx
+# 粘贴到宝塔：网站 -> 设置 -> 伪静态（替换原伪静态，不要重复追加）。
+# 前提：运行目录 /public；宝塔 PHP 版本选择 8.4，保留默认 enable-php-84.conf。
+# server 级 return 防护先于任何 PHP/静态正则 location 生效，无需调整 include 顺序。
+if ($uri ~* "^/(?:storage|originals|previews|disabled|vendor|app|bootstrap|config|database|resources|routes|tests|deploy|docs|bin)(?:/|$)") {
+    return 404;
+}
+if ($uri ~ "(?:^|/)\.(?!well-known(?:/|$))") {
+    return 404;
+}
+# 只允许 /index.php 进入宝塔现有 PHP handler，阻止其他脚本及 PATH_INFO。
+if ($uri ~ "^/(?!index\.php$).*(?i:\.(?:php[0-9]*|phtml|phar))(?:[./]|$)") {
+    return 404;
+}
+# 拒绝所有非规范 media 路径（包括大小写变形），避免被默认静态缓存正则接管。
+if ($uri ~ "^(?!/media/[0-9]{4}/(?:0[1-9]|1[0-2])/[a-f0-9]{32}\.webp$)(?i:/media)(?:/|$)") {
+    return 404;
+}
+location ^~ /media/ {
+    try_files $uri =404;
+    open_file_cache off;
+    types { image/webp webp; }
+    default_type image/webp;
+    expires off;
+    add_header Cache-Control "public, max-age=0, must-revalidate" always;
+    add_header X-Content-Type-Options nosniff always;
+    etag on;
+}
+location / {
+    try_files $uri $uri/ /index.php?$query_string;
+}
 ```
 
-将 Nginx 网站根目录指向项目的 **`public/`**，参考 [Nginx 配置](deploy/nginx.conf.example) 或 [宝塔伪静态](deploy/baota-rewrite.conf)，启用 HTTPS。确认 PHP 运行用户具备本站安装所需写权限后，访问 `https://你的域名/install`，由向导检查环境并配置专用 MySQL 空库、站点和管理员。
+以上内容与包内 [`deploy/baota-rewrite.conf`](deploy/baota-rewrite.conf) 一致。若提示 `location` 重复，先移除网站配置中重复的 `location /` 或 `location ^~ /media/`。非宝塔环境可参考 [Nginx 配置模板](deploy/nginx.conf.example)。
 
-使用网页安装时，**不要预先复制 `.env`、生成 APP_KEY 或迁移数据库**；已有配置、非空数据库或安装中断状态会阻止重装。不要运行 `composer run setup` 后再使用网页安装。
+### 4. 完成网页安装
 
-CLI 手动安装可参考 `.env.example` 和 [部署说明](docs/deployment.md)。不要执行 `storage:link`，私有原图、预览、安装状态与更新备份不能公开访问。
+打开 **`https://你的域名/install`**，依次完成：
 
-```sh
-# 建议每小时通过 cron 执行
-php artisan vault:cleanup
-# 只读检查记录、文件体积与孤立文件
-php artisan vault:audit
-```
+1. **环境检查**：确认扩展、WebP 和目录权限通过；失败项按页面提示修复后重新检测。
+2. **数据库**：填写为本站准备的 MySQL 空库信息。
+3. **站点与管理员**：填写站点名称、管理员邮箱和密码。
+4. **确认安装**：核对信息，完成后登录即可上传图片。
+
+不要预先创建 `.env`、生成 APP_KEY 或手动迁移数据库；安装向导会自动完成。不要执行 `storage:link` 或设置 `777` 权限。
+
+本完整包用于新站安装，安装后入口自动锁定。已有站点请先备份并使用兼容的更新包，不要覆盖安装或降级。
 
 ## 目录
 

@@ -1,0 +1,53 @@
+# 宝塔站点 Nginx 配置模板：先替换域名、项目路径、证书及 PHP socket。
+# 这是完整 server 示例；不要与宝塔默认 PHP location 重复叠加。
+server {
+    listen 80;
+    server_name images.example.com;
+    return 301 https://$host$request_uri;
+}
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name images.example.com;
+    root /www/wwwroot/image-vault/public;
+    index index.php;
+
+    ssl_certificate /www/server/panel/vhost/cert/images.example.com/fullchain.pem;
+    ssl_certificate_key /www/server/panel/vhost/cert/images.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 24m;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+
+    # 只有真实存在、符合应用随机命名规则的 WebP 可以被公开访问。
+    # 不使用 alias / storage 软链接，不把未命中文件转交 Laravel。
+    location ~ "^/media/[0-9]{4}/(?:0[1-9]|1[0-2])/[a-f0-9]{32}\.webp$" {
+        try_files $uri =404;
+        open_file_cache off;
+        types { image/webp webp; }
+        default_type image/webp;
+        add_header X-Content-Type-Options nosniff always;
+        add_header Cache-Control "public, max-age=0, must-revalidate" always;
+        etag on;
+    }
+    # 必须在其他泛化静态/PHP regex 之前；禁止 jpg/png/php/路径变形等。
+    location ~ ^/media(?:/|$) { return 404; }
+    # 私有原图/预览/停用文件均位于 public 之外，禁止直接路径访问。
+    location ~ ^/(?:storage|originals|previews|disabled|vendor|app|bootstrap|config|database|resources|routes|tests|deploy|docs)(?:/|$) { return 404; }
+    location ~ /\. { deny all; }
+
+    location / { try_files $uri $uri/ /index.php?$query_string; }
+    # 唯一允许执行的 PHP 文件；任何上传 .php 都无法执行。
+    location = /index.php {
+        include fastcgi_params;
+        fastcgi_pass unix:/tmp/php-cgi-84.sock;
+        fastcgi_param SCRIPT_FILENAME $document_root/index.php;
+        fastcgi_param HTTPS on;
+        fastcgi_param HTTP_PROXY "";
+        fastcgi_read_timeout 120s;
+    }
+    location ~ \.php(?:/|$) { return 404; }
+
+    access_log /www/wwwlogs/image-vault.access.log;
+    error_log /www/wwwlogs/image-vault.error.log;
+}

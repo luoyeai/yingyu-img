@@ -1,0 +1,11 @@
+#!/bin/sh
+# Project-only Imagick loader. Does not edit php.ini.
+set -eu
+project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+php_bin=${IMAGE_VAULT_PHP_BIN:-/opt/homebrew/bin/php}
+extension="$project_dir/.tools/runtime/extensions/imagick.so"
+if [ ! -f "$extension" ]; then
+  echo 'Project Imagick extension is unavailable. Use PHP with Imagick enabled on your deployment host.' >&2
+  exit 1
+fi
+exec "$php_bin" -d "extension=$extension" -d upload_max_filesize=21M -d post_max_size=24M -d memory_limit=512M "$@"

@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$project_dir"
+if [ ! -f .env.testing ]; then
+ echo 'Create .env.testing for an isolated MySQL test database before running tests.' >&2
+ exit 1
+fi
+exec "$project_dir/bin/php-local" vendor/bin/phpunit "$@"

@@ -1,0 +1,80 @@
+#!/bin/sh
+# Standalone Nginx: project-only prefix/PID/logs; never touches brew services.
+set -eu
+project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+nginx_bin=${IMAGE_VAULT_NGINX_BIN:-/opt/homebrew/bin/nginx}
+runtime="$project_dir/.tools/runtime/nginx"
+mkdir -p "$runtime"
+is_running() {
+  [ -f "$runtime/nginx.pid" ] || return 1
+  project_pid=$(cat "$runtime/nginx.pid")
+  case "$project_pid" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$project_pid" 2>/dev/null || return 1
+  project_command=$(ps -p "$project_pid" -o command= 2>/dev/null) || return 1
+  case "$project_command" in *"$runtime/"*) return 0 ;; *) return 1 ;; esac
+}
+write_config() {
+  cat > "$runtime/nginx.conf" <<NGINX
+worker_processes 1;
+pid "$runtime/nginx.pid";
+error_log "$runtime/error.log";
+events { worker_connections 128; }
+http {
+  access_log "$runtime/access.log";
+  client_body_temp_path "$runtime/client_body";
+  proxy_temp_path "$runtime/proxy_temp";
+  fastcgi_temp_path "$runtime/fastcgi_temp";
+  uwsgi_temp_path "$runtime/uwsgi_temp";
+  scgi_temp_path "$runtime/scgi_temp";
+  types { text/css css; application/javascript js; image/webp webp; }
+  default_type application/octet-stream;
+  server {
+    listen 127.0.0.1:8788;
+    server_name localhost 127.0.0.1;
+    root "$project_dir/public";
+    autoindex off;
+    client_max_body_size 24m;
+    add_header X-Content-Type-Options nosniff always;
+    location ~ "^/media/[0-9]{4}/(?:0[1-9]|1[0-2])/[a-f0-9]{32}\\.webp\$" {
+      try_files \$uri =404;
+      types { image/webp webp; }
+      default_type image/webp;
+      add_header X-Content-Type-Options nosniff always;
+      add_header Cache-Control "public, max-age=0, must-revalidate" always;
+      etag on;
+    }
+    location ~ ^/media(?:/|\$) { return 404; }
+    location ~ ^/(?:storage|originals|previews|disabled|vendor|app|bootstrap|config|database|resources|routes|tests|deploy|docs)(?:/|\$) { return 404; }
+    location ~ /\\. { deny all; }
+    location ~ \\.php(?:/|\$) { return 404; }
+    location / { try_files \$uri @application; }
+    location @application {
+      proxy_pass http://127.0.0.1:8787;
+      proxy_set_header Host \$http_host;
+      proxy_set_header X-Forwarded-Proto \$scheme;
+      proxy_read_timeout 120s;
+    }
+  }
+}
+NGINX
+}
+case "${1:-status}" in
+ start)
+  if is_running; then echo 'Project Nginx is already running on 127.0.0.1:8788.'; exit 0; fi
+  write_config
+  "$nginx_bin" -p "$runtime/" -c nginx.conf -t
+  "$nginx_bin" -p "$runtime/" -c nginx.conf
+  echo 'Project Nginx started on http://127.0.0.1:8788 (PHP upstream 8787).'
+  ;;
+ stop)
+  if is_running; then "$nginx_bin" -p "$runtime/" -c nginx.conf -s quit; echo 'Project Nginx shutdown requested.'; else echo 'Project Nginx is stopped.'; fi
+  ;;
+ test)
+  write_config
+  "$nginx_bin" -p "$runtime/" -c nginx.conf -t
+  ;;
+ status)
+  if is_running; then echo "Project Nginx is running on 127.0.0.1:8788 (PID $(cat "$runtime/nginx.pid"))."; else echo 'Project Nginx is stopped.'; exit 1; fi
+  ;;
+ *) echo 'Usage: bin/nginx-local [start|stop|test|status]' >&2; exit 2 ;;
+esac

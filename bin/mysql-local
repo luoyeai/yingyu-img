@@ -1,0 +1,29 @@
+#!/bin/sh
+# Controls only this project's isolated MySQL instance.
+set -eu
+project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+mysql_base=${IMAGE_VAULT_MYSQL_BASE:-"$HOME/Library/Application Support/Local/lightning-services/mysql-8.0.35+4/bin/darwin-arm64"}
+runtime="$project_dir/.tools/runtime/mysql"
+is_running() {
+  [ -f "$runtime/mysql.pid" ] || return 1
+  project_pid=$(cat "$runtime/mysql.pid")
+  case "$project_pid" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$project_pid" 2>/dev/null || return 1
+  project_command=$(ps -p "$project_pid" -o command= 2>/dev/null) || return 1
+  case "$project_command" in *"--datadir=$runtime/data"*) return 0 ;; *) return 1 ;; esac
+}
+case "${1:-status}" in
+  start)
+    if is_running; then echo 'Project MySQL is already running.'; exit 0; fi
+    [ -d "$runtime/data/mysql" ] || { echo 'Local MySQL data directory is missing; see docs/local-environment.md.' >&2; exit 1; }
+    nohup "$mysql_base/bin/mysqld" --no-defaults --basedir="$mysql_base" --datadir="$runtime/data" --socket="$runtime/mysql.sock" --port=13368 --bind-address=127.0.0.1 --mysqlx=0 --pid-file="$runtime/mysql.pid" --log-error="$runtime/mysql.log" > "$runtime/launcher.log" 2>&1 &
+    echo 'Starting isolated MySQL on 127.0.0.1:13368.'
+    ;;
+  stop)
+    if is_running; then kill -TERM "$(cat "$runtime/mysql.pid")"; echo 'Shutdown requested for project MySQL.'; else echo 'Project MySQL is stopped.'; fi
+    ;;
+  status)
+    if is_running; then echo "Project MySQL is running on 127.0.0.1:13368 (PID $(cat "$runtime/mysql.pid"))."; else echo 'Project MySQL is stopped.'; exit 1; fi
+    ;;
+  *) echo 'Usage: bin/mysql-local [start|stop|status]' >&2; exit 2 ;;
+esac

@@ -67,6 +67,8 @@ php vendor/bin/phpunit tests/Unit/UploadAssetTest.php
 node --check public/assets/upload.js
 
 # 原开发机的独立 Imagick 包装器和测试入口
+# 网页上传的仓库检出后，先补齐这四个脚本的执行权限
+chmod +x bin/php-local bin/test bin/mysql-local bin/nginx-local
 bin/test tests/Unit/UploadAssetTest.php
 ```
 

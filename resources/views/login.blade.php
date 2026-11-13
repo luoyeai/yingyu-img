@@ -1,6 +1,16 @@
+@php
+require_once base_path('bootstrap/preflight.php');
+@endphp
 @extends('layout')
 @section('title', '管理员登录')
 @section('content')
+@php
+if (!isset($geetestEnabled, $geetestId)) {
+    $geetestConfiguration = app(\App\Services\Geetest::class)->configuration();
+    $geetestEnabled = (bool) $geetestConfiguration['enabled'];
+    $geetestId = $geetestConfiguration['captcha_id'];
+}
+@endphp
 <main class="login-page">
     <section class="login-visual" aria-label="映屿Img 图片工作室">
         <a class="brand" href="{{ route('login') }}"><span class="brand-mark"><svg class="icon" aria-hidden="true"><use href="#i-mark"/></svg></span>映屿Img</a>
@@ -16,14 +26,15 @@
             <a class="brand" href="{{ route('login') }}"><span class="brand-mark"><svg class="icon" aria-hidden="true"><use href="#i-mark"/></svg></span>映屿Img</a>
             <h1 id="login-title">管理员登录</h1><p class="muted">登录工作室，继续整理你的图片。</p>
             @if($errors->any())<div class="notice error" role="alert">{{ $errors->first() }}</div>@endif
-            <form method="post" action="{{ route('login') }}" class="stack-form">@csrf
+            <form method="post" action="{{ route('login') }}" class="stack-form" @if($geetestEnabled) data-geetest-login data-captcha-id="{{ $geetestId }}" @endif>@csrf
                 <label>邮箱<input name="email" type="email" autocomplete="username" required value="{{ old('email') }}" placeholder="请输入管理员邮箱" autofocus></label>
                 <label>密码<input name="password" type="password" autocomplete="current-password" required placeholder="请输入密码"></label>
+                @if($geetestEnabled)<p class="caption" data-geetest-status role="status">提交登录时完成极验验证。</p><script src="{{ asset('assets/geetest.js') }}?v={{ vault_asset_version(base_path(), 'assets/geetest.js') }}" defer></script>@endif
                 <button class="button primary" type="submit">登录映屿Img</button>
             </form>
             <p class="caption">仅管理员可登录，不开放注册。</p>
         </div>
-        <p class="login-footer">映屿Img · 单人图片工作室</p>
+        <p class="login-footer">映屿Img</p>
     </section>
 </main>
 @endsection

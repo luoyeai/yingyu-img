@@ -778,6 +778,8 @@ class UpdateRunner
         }
         $this->validateChildDatabase();
         $probe = <<<'PHP'
+$_SERVER["REQUEST_METHOD"] = "CLI";
+require_once "bootstrap/preflight.php";
 require "vendor/autoload.php";
 $app = require "bootstrap/app.php";
 $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
@@ -982,6 +984,14 @@ PHP;
                 rename($base.'/runtime-previous', $base.'/runtime');
             }
             throw new RuntimeException('无法发布独立恢复运行时。');
+        }
+        if (function_exists('opcache_invalidate') && filter_var(ini_get('opcache.enable'), FILTER_VALIDATE_BOOLEAN)
+            && (PHP_SAPI !== 'cli' || filter_var(ini_get('opcache.enable_cli'), FILTER_VALIDATE_BOOLEAN))) {
+            foreach (glob($base.'/runtime/*.php') ?: [] as $path) {
+                if (! opcache_invalidate($path, true)) {
+                    throw new RuntimeException('恢复引擎 OPcache 失效失败，更新准备已停止。');
+                }
+            }
         }
     }
 

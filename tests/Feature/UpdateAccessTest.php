@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Http\Middleware\UpdateWriteGuard;
 use App\Models\User;
 use App\Services\ImageStorage;
+use App\Services\Updates\ReleaseChecker;
 use App\Services\Updates\UpdateRunner;
 use App\Services\Updates\UpdateState;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -199,6 +200,64 @@ class UpdateAccessTest extends TestCase
         $this->assertSame('prepared', (new UpdateState($this->updateRoot))->read('journal.json')['stage']);
     }
 
+    public function test_stale_recovery_form_has_safe_reentry_without_executing_an_operation(): void
+    {
+        [$secret] = $this->recoveryFixture();
+        $state = new UpdateState($this->updateRoot);
+        $before = file_get_contents($state->directory().'/journal.json');
+        $input = ['action' => 'restore', 'confirmation' => 'restore', 'csrf' => str_repeat('0', 64)];
+        $response = $this->gatewayRequest(['vault_update_recovery' => $secret], $input, 'POST');
+        $this->assertSame(419, $response['status']);
+        $this->assertStringContainsString('/update-recovery?inspect=1', $response['body']);
+        $this->assertStringContainsString('本次操作未执行', $response['body']);
+        $this->assertSame($before, file_get_contents($state->directory().'/journal.json'));
+        $response = $this->gatewayRequest(['vault_update_recovery' => $secret], $input, 'POST', '/update-recovery', true);
+        $this->assertSame(419, $response['status']);
+        $this->assertStringContainsString('recovery_csrf_expired', $response['body']);
+        $this->assertStringNotContainsString('"csrf":', $response['body']);
+        $this->assertSame($before, file_get_contents($state->directory().'/journal.json'));
+    }
+
+    public function test_expired_json_authorization_requires_reauthentication_without_exposing_a_token(): void
+    {
+        [$secret, $task] = $this->recoveryFixture();
+        $state = new UpdateState($this->updateRoot);
+        $state->write('recovery-grant.json', ['hash' => hash('sha256', $secret), 'expires' => time() - 1, 'task' => $task]);
+        $response = $this->gatewayRequest(['vault_update_recovery' => $secret], [], 'GET', '/update-recovery', true);
+        $this->assertSame(401, $response['status']);
+        $this->assertStringContainsString('recovery_auth_required', $response['body']);
+        $this->assertStringNotContainsString('"csrf":', $response['body']);
+    }
+
+    public function test_restoring_task_cannot_be_advanced_even_with_valid_authorization_and_csrf(): void
+    {
+        [$secret, $task] = $this->recoveryFixture();
+        $state = new UpdateState($this->updateRoot);
+        $state->write('journal.json', [...$state->read('journal.json'), 'status' => 'restoring', 'active' => true]);
+        $state->write('recovery-grant.json', [...$state->read('recovery-grant.json'), 'confirmed' => true]);
+        $before = file_get_contents($state->directory().'/journal.json');
+        $input = ['action' => 'advance', 'stage' => 'prepared', 'csrf' => hash_hmac('sha256', 'vault-update:'.$task, $secret)];
+        $response = $this->gatewayRequest(['vault_update_recovery' => $secret], $input, 'POST', '/update-recovery', true);
+        $this->assertSame(409, $response['status']);
+        $this->assertStringContainsString('不能继续更新', json_decode(explode("\nGATEWAY_STATUS=", $response['body'])[0], true)['error']);
+        $this->assertSame($before, file_get_contents($state->directory().'/journal.json'));
+        $response = $this->gatewayRequest(['vault_update_recovery' => $secret]);
+        $this->assertStringNotContainsString('name="action" value="advance"', $response['body']);
+    }
+
+    public function test_recovery_login_post_is_not_mistaken_for_a_restore_when_cookie_is_already_valid(): void
+    {
+        [$secret, $task] = $this->recoveryFixture();
+        $state = new UpdateState($this->updateRoot);
+        $state->write('recovery-account.json', ['task' => $task, 'email' => 'recovery@example.invalid', 'password_hash' => password_hash('Fixture-recovery-82!', PASSWORD_BCRYPT)]);
+        $challenge = bin2hex(random_bytes(32));
+        $input = ['action' => 'login', 'csrf' => hash_hmac('sha256', 'vault-recovery-login:'.$task, $challenge), 'email' => 'recovery@example.invalid', 'password' => 'Fixture-recovery-82!'];
+        $cookies = ['vault_update_recovery' => $secret, 'vault_recovery_challenge' => $challenge];
+        $this->assertSame(303, $this->gatewayRequest($cookies, $input, 'POST')['status']);
+        $this->assertNotSame(hash('sha256', $secret), $state->read('recovery-grant.json')['hash']);
+        $this->assertSame('prepared', $state->read('journal.json')['status']);
+    }
+
     public function test_standalone_login_recovers_expired_cookie_only_after_password_and_csrf(): void
     {
         [$secret, $task] = $this->recoveryFixture();
@@ -225,6 +284,21 @@ class UpdateAccessTest extends TestCase
         $this->assertStringNotContainsString('Fixture-recovery-82!', file_get_contents($state->directory().'/recovery-account.json'));
     }
 
+    public function test_standalone_login_accepts_existing_multibyte_passwords_with_the_same_character_limit_as_login(): void
+    {
+        [, $task] = $this->recoveryFixture();
+        $state = new UpdateState($this->updateRoot);
+        $password = str_repeat('密', 50);
+        $state->write('recovery-account.json', ['task' => $task, 'email' => 'recovery@example.invalid', 'password_hash' => password_hash($password, PASSWORD_BCRYPT)]);
+        $challenge = bin2hex(random_bytes(32));
+        $input = ['action' => 'login', 'csrf' => hash_hmac('sha256', 'vault-recovery-login:'.$task, $challenge), 'email' => 'recovery@example.invalid', 'password' => $password];
+        $cookies = ['vault_recovery_challenge' => $challenge];
+        $this->assertSame(303, $this->gatewayRequest($cookies, $input, 'POST')['status']);
+        $this->assertSame(422, $this->gatewayRequest($cookies, [...$input, 'password' => str_repeat('密', 129)], 'POST')['status']);
+        $this->assertSame(422, $this->gatewayRequest($cookies, [...$input, 'password' => str_repeat('x', 129)], 'POST')['status']);
+        $this->assertSame('prepared', $state->read('journal.json')['status']);
+    }
+
     public function test_standalone_login_limits_failed_passwords_and_rejects_finished_tasks(): void
     {
         [, $task] = $this->recoveryFixture();
@@ -243,14 +317,19 @@ class UpdateAccessTest extends TestCase
         $this->assertSame(403, $this->gatewayRequest($cookies, [...$input, 'password' => 'Fixture-recovery-82!'], 'POST')['status']);
     }
 
-    public function test_update_page_shows_only_version_notes_and_confirmation_by_default(): void
+    public function test_update_page_preserves_version_notes_and_confirmation_alongside_release_detection(): void
     {
         $this->actingAs(User::factory()->create());
         $runner = Mockery::mock(UpdateRunner::class);
-        $runner->shouldReceive('current')->once()->andReturn(['program' => '1.0.1', 'schema' => []]);
+        $runner->shouldNotReceive('current');
         $runner->shouldReceive('status')->once()->andReturn(['id' => str_repeat('a', 32), 'from' => '1.0.1', 'to' => '1.0.2', 'stage' => 'prepared', 'status' => 'prepared', 'package' => ['release_notes' => '简化更新操作。'], 'log' => []]);
         $this->app->instance(UpdateRunner::class, $runner);
+        $this->app->make(UpdateState::class)->write('version.json', ['program' => '1.0.1', 'schema' => [], 'managed_files' => []]);
+        $releases = Mockery::mock(ReleaseChecker::class);
+        $releases->shouldReceive('check')->once()->andReturn(['version' => '1.0.2', 'message' => '无法确认当前版本/基线，请查看发行页。', 'url' => ReleaseChecker::RELEASES_URL]);
+        $this->app->instance(ReleaseChecker::class, $releases);
         $this->get('/updates')->assertOk()->assertSee('1.0.1 → 1.0.2')->assertSee('简化更新操作。')->assertSee('确认更新')
+            ->assertSee('官方稳定版本')->assertSee('检测新版本')->assertSee('无法确认当前版本/基线')
             ->assertDontSee('任务编号')->assertDontSee('所需 PHP')->assertDontSee('兼容程序范围')->assertDontSee('受保护恢复入口')->assertDontSee('阶段记录');
     }
 

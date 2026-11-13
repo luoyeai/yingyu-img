@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\Updates\ReleaseChecker;
 use App\Services\Updates\UpdateRunner;
 use App\Services\Updates\UpdateState;
 use Illuminate\Http\RedirectResponse;
@@ -14,12 +15,12 @@ use Throwable;
 
 class UpdateController extends Controller
 {
-    public function index(UpdateRunner $runner): View
+    public function index(UpdateRunner $runner, UpdateState $state, ReleaseChecker $releases): View
     {
         $version = null;
         $problem = null;
         try {
-            $version = $runner->current();
+            $version = $state->version();
         } catch (Throwable) {
             $problem = '尚未建立更新版本记录；上传后将核对既有迁移基线。未知基线不会执行更新。';
         }
@@ -31,7 +32,14 @@ class UpdateController extends Controller
             $problem = '更新状态无法安全读取。请保留私有更新目录并检查文件完整性与权限。';
         }
 
-        return view('update', ['version' => $version, 'update' => $update, 'problem' => $problem]);
+        return view('update', ['version' => $version, 'update' => $update, 'problem' => $problem, 'release' => $releases->check()]);
+    }
+
+    public function checkRelease(ReleaseChecker $releases): RedirectResponse
+    {
+        $release = $releases->check(manual: true);
+
+        return redirect()->route('updates')->with('release_check', $release['message']);
     }
 
     public function upload(Request $request, UpdateRunner $runner, UpdateState $state): RedirectResponse

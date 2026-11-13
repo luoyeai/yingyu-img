@@ -1,4 +1,4 @@
-# 映屿 Img 1.0.0
+# 映屿 Img 1.1.0
 
 作者：[Luoye](https://luoyeai.cn) · MIT 许可证。
 

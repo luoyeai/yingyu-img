@@ -22,7 +22,7 @@
 @foreach([['upload','upload','上传图片'],['library','image','图片库'],['trash','trash','回收站'],['settings','settings','设置与状态'],['updates','settings','系统更新']] as [$route,$icon,$label])
 <a href="{{ route($route) }}" class="nav-item {{ request()->routeIs($route) ? 'active' : '' }}" @if(request()->routeIs($route)) aria-current="page" @endif><svg class="icon"><use href="#i-{{ $icon }}"/></svg>{{ $label }}</a>
 @endforeach
-</nav><div class="sidebar-footer"><span class="muted">单人图片工作室</span><form method="post" action="{{ route('logout') }}">@csrf<button class="text-button" type="submit">退出登录</button></form><small>映屿Img · 本地存储</small></div></aside>
+</nav><div class="sidebar-footer"><form method="post" action="{{ route('logout') }}">@csrf<button class="text-button" type="submit">退出登录</button></form></div></aside>
 <div class="mobile-header"><a class="brand" href="{{ route('upload') }}"><svg class="icon"><use href="#i-mark"/></svg>映屿Img</a><button class="icon-button" type="button" aria-controls="navigation" aria-expanded="false" data-nav-toggle aria-label="展开导航"><svg class="icon"><use href="#i-menu"/></svg></button></div>
 <main class="workspace">
 @if(session('success'))<div class="notice success" role="status">{{ session('success') }}</div>@endif
@@ -33,5 +33,5 @@
 @yield('content')
 @endauth
 <div class="toast" role="status" aria-live="polite" id="toast" hidden></div>
-<dialog id="compare-dialog" class="wide-dialog"><div class="dialog-heading"><h2>处理前后对比</h2><button type="button" class="icon-button" data-close-dialog aria-label="关闭对比">×</button></div><p class="muted">原始比例显示，可分别滚动检查局部；拖动滑块同步放大。</p><label class="zoom-control">缩放 <input type="range" id="compare-zoom" min="25" max="200" value="100" step="25"><output id="compare-scale">100%</output></label><div class="comparison"><section><h3>原图 <span id="compare-before-meta"></span></h3><div class="comparison-viewport"><img id="compare-before" alt="上传的本地原图"></div></section><section><h3>WebP <span id="compare-after-meta"></span></h3><div class="comparison-viewport"><img id="compare-after" alt="处理后的 WebP"></div></section></div></dialog>
+<dialog id="compare-dialog" class="wide-dialog"><div class="dialog-heading"><h2>处理前后对比</h2><button type="button" class="icon-button" data-close-dialog aria-label="关闭对比">×</button></div><p class="muted">拖动滑块同步缩放。</p><label class="zoom-control">缩放 <input type="range" id="compare-zoom" min="25" max="200" value="100" step="25"><output id="compare-scale">100%</output></label><div class="comparison"><section><h3>原图 <span id="compare-before-meta"></span></h3><div class="comparison-viewport"><img id="compare-before" alt="上传的本地原图"></div></section><section><h3>WebP <span id="compare-after-meta"></span></h3><div class="comparison-viewport"><img id="compare-after" alt="处理后的 WebP"></div></section></div></dialog>
 </body></html>

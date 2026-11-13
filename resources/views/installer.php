@@ -176,7 +176,7 @@ $descriptions = ['environment' => '检查 PHP、图片处理能力与目录权�
             <p id="submission-status" class="submission-status" role="status" aria-live="polite" hidden></p>
             <noscript><p class="no-script-note">JavaScript 未启用。所有安装步骤仍可通过表单提交完成，请勿重复点击提交。</p></noscript>
         </div>
-    <footer class="installer-footer"><span>映屿Img · 单人图片工作室</span><span>本地存储 · WebP</span></footer>
+    <footer class="installer-footer"><span>映屿Img</span></footer>
     </main>
 </div>
 </body>

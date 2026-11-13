@@ -111,7 +111,7 @@
     const lossless = $('#upload-lossless');
     function presetDescription() {
         $('#quality-value').value = quality.value;
-        $('#preset-description').textContent = preset.value === 'standard' ? '通用预设使用设置中的默认参数。更改处理参数将切换至自定义。' : preset.value === 'high' ? '高清预设：质量 95，保留原尺寸；静态 WebP 尽量避免重复有损编码。' : '自定义参数用于后续加入队列的图片，已排队图片保留加入时的设置。';
+        $('#preset-description').textContent = preset.value === 'standard' ? '使用默认参数。调整后切换为自定义。' : preset.value === 'high' ? '质量 95，保留原尺寸。' : '用于接下来选择的图片，已排队图片不变。';
     }
     preset.addEventListener('change', () => {
         if (preset.value === 'standard') { quality.value = options.quality; maxEdge.value = options.max_edge; lossless.checked = Boolean(Number(options.lossless)); }
@@ -161,12 +161,12 @@
         if (!maxEdge.checkValidity()) { maxEdge.reportValidity(); return; }
         const selection = uploadSelection();
         checking++; summary();
-        const status = $('#directory-status'); status.hidden = false; status.textContent = '正在读取图片和文件夹，请保持页面打开…';
+        const status = $('#directory-status'); status.hidden = false; status.textContent = '正在读取文件…';
         try {
             const {sources, errors} = await core.droppedSources(event.dataTransfer);
-            status.textContent = errors.length ? `有 ${errors.length} 项未能读取：${errors.slice(0, 3).join('、')}。请检查权限后重新拖入；其余可读取文件已加入队列。` : sources.length ? `已读取 ${sources.length} 个文件，自动分批排队、逐张上传。` : '未找到可读取文件；若文件夹非空，请使用支持目录拖拽的浏览器或多选图片上传。';
+            status.textContent = errors.length ? `有 ${errors.length} 项未能读取：${errors.slice(0, 3).join('、')}。请检查权限后重试。` : sources.length ? `已添加 ${sources.length} 个文件。` : '未找到图片，请尝试多选图片上传。';
             await enqueueFiles(sources, selection);
-        } catch { status.textContent = '目录读取失败，请检查文件访问权限后重试，或多选图片上传。'; }
+        } catch { status.textContent = '读取失败，请检查权限或多选图片上传。'; }
         finally { checking--; summary(); if (!checking) void controller.run(); }
     });
     document.addEventListener('paste', event => {
@@ -177,7 +177,8 @@
     window.addEventListener('dragover', event => { if (event.dataTransfer?.types.includes('Files')) event.preventDefault(); });
     window.addEventListener('drop', event => { if (event.dataTransfer?.types.includes('Files')) event.preventDefault(); });
     function summary() {
-        const completed = queue.filter(item => ['done','reused'].includes(item.state)).length;
+        const created = queue.filter(item => item.result && !item.result.duplicate).length;
+        const duplicates = queue.filter(item => item.result?.duplicate).length;
         const failed = queue.filter(item => item.state === 'error').length;
         const unknown = queue.filter(item => item.state === 'uncertain').length;
         const pending = queue.filter(item => ['checking','pending','uploading','retrying'].includes(item.state)).length;
@@ -185,7 +186,10 @@
         const cancelled = queue.filter(item => item.state === 'cancelled').length;
         const waiting = queue.find(item => item.state === 'retrying');
         $('#queue-count').textContent = `(${queue.length})`;
-        $('#queue-summary').textContent = queue.length ? `成功/复用 ${completed} · 失败 ${failed} · 结果未确认 ${unknown} · 待处理 ${pending} · 链接不可用 ${unavailable} · 取消 ${cancelled}${checking ? ' · 正在读取/检查文件，请保持页面打开' : ''}${controller.paused ? ` · 已暂停：${controller.reason}` : waiting ? ' · 等待退避重试' : controller.running ? ' · 逐张处理中' : ''}` : '选择或拖入图片、文件夹后自动分批处理，单张永久失败不影响其他图片。';
+        const counts = `新增 ${created} · 重复 ${duplicates} · 失败 ${failed}${unknown ? ` · 结果未确认 ${unknown}` : ''}${unavailable ? ` · 链接不可用 ${unavailable}` : ''}${cancelled ? ` · 已取消 ${cancelled}` : ''}`;
+        const progress = controller.paused ? `已暂停：${controller.reason}` : checking ? '正在读取文件…' : waiting ? '正在等待重试…' : controller.running || pending ? `处理中 ${queue.length - pending}/${queue.length}` : '处理完成';
+        $('#queue-summary').hidden = !queue.length;
+        $('#queue-summary').textContent = queue.length ? `${progress} · ${counts}。刷新前请导出所需记录。` : '';
         $('#queue-empty').hidden = queue.length > 0;
         $('#pause-queue').hidden = controller.paused;
         $('#pause-queue').disabled = !controller.running && !pending;
@@ -229,7 +233,7 @@
         } finally { checking--; summary(); if (!checking) void controller.run(); }
     }
     function renderItem(item) {
-        const rendering = JSON.stringify([item.state, item.error, item.errorCode, item.attempts, item.retriesUsed, item.retryAt, item.format, item.result]);
+        const rendering = JSON.stringify([item.state, item.error, item.errorCode, item.attempts, item.retriesUsed, item.retryAt, item.format, item.linkFormat, item.result]);
         if (rendering === item.rendering) return;
         const row = item.element;
         row.replaceChildren();
@@ -244,14 +248,14 @@
             row.append(placeholder);
         }
         const identity = createElement('div');
-        identity.append(createElement('p', 'result-filename', item.file.name));
-        if (item.sourcePath) identity.append(createElement('p', 'caption result-source', item.sourcePath));
+        const filename = createElement('p', 'result-filename', item.file.name);
+        filename.title = item.sourcePath || item.file.name;
+        identity.append(filename);
         let status = core.labels[item.state];
         if (item.error) status += `：${item.error}`;
         if (item.state === 'retrying') status += ` · 不早于 ${new Date(item.retryAt).toLocaleTimeString()} 重试`;
-        if (item.result?.trashed) status += '：相同图片在回收站，请先恢复';
-        else if (item.result?.image.disabled_at) status += '：链接已停用，请在图片库恢复';
-        if (item.attempts) status += ` · 已尝试 ${item.attempts} 次（自动重试 ${item.retriesUsed}/${core.MAX_RETRIES}）`;
+        if (item.result?.trashed) status += '：图片已存在于回收站，未恢复；请查看原记录';
+        else if (item.result?.image.disabled_at) status += '：图片已存在但链接已停用，未启用；请查看原记录';
         identity.append(createElement('p', `result-status${['error','uncertain'].includes(item.state) ? ' result-error' : ''}`, status));
         row.append(identity);
         const measure = createElement('div', 'result-measure');
@@ -271,17 +275,51 @@
             cancel.addEventListener('click', () => controller.cancel(item)); actions.append(cancel);
         }
         if (item.result) {
+            if (item.result.duplicate) {
+                const view = createElement('button', 'button small', '查看原记录'); view.type = 'button';
+                view.addEventListener('click', () => showExistingRecord(item)); actions.append(view);
+            }
             if (item.result.trashed) { const link = createElement('a', 'button small', '前往回收站'); link.href = uploadApp.dataset.trashUrl; actions.append(link); }
             else if (!item.result.image.disabled_at) {
                 const format = createElement('select'); format.setAttribute('aria-label', `选择 ${item.file.name} 的链接格式`);
                 [['url','直链'],['markdown','Markdown'],['html','HTML']].forEach(([value,label]) => { const option = createElement('option','',label); option.value = value; format.append(option); });
+                format.value = item.linkFormat || 'url';
+                const link = createElement('span', 'result-link');
+                link.tabIndex = 0;
+                link.setAttribute('role', 'textbox');
+                link.setAttribute('aria-readonly', 'true');
+                link.setAttribute('aria-label', `${item.file.name} 的完整链接内容`);
+                const updateLink = () => { link.textContent = imageLink(item.result.image, format.value); link.title = link.textContent; };
+                const selectLink = () => {
+                    const selection = window.getSelection();
+                    const range = document.createRange();
+                    range.selectNodeContents(link);
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                };
+                link.addEventListener('focus', selectLink);
+                link.addEventListener('click', selectLink);
+                format.addEventListener('change', () => { item.linkFormat = format.value; updateLink(); });
+                updateLink();
                 const copy = createElement('button','button small','复制链接'); copy.type = 'button'; copy.addEventListener('click', () => copyText(imageLink(item.result.image, format.value)));
-                actions.append(format,copy);
+                actions.append(format,link,copy);
                 const compare = createElement('button','text-button','局部对比'); compare.type = 'button'; compare.addEventListener('click', () => compareImages(item)); actions.append(compare);
             }
         }
         row.append(actions);
         item.rendering = rendering;
+    }
+    function showExistingRecord(item) {
+        const image = item.result.image;
+        $('#existing-preview').src = image.preview_url;
+        $('#existing-preview').alt = image.alt || image.display_name || image.original_name || '';
+        $('#existing-name').textContent = image.display_name || image.original_name || '未命名';
+        const originalGroup = [...group.options].find(option => String(option.value) === String(image.group_id || ''));
+        $('#existing-meta').textContent = `记录 #${image.id} · 原名：${image.original_name || '未记录'} · 分组：${originalGroup?.textContent || (image.group_id ? `#${image.group_id}` : '未分组')} · 存储：${item.storageName}`;
+        $('#existing-status').textContent = item.result.trashed ? '原记录在回收站，本次未恢复。请在回收站查看并决定是否恢复。' : image.disabled_at ? '原记录的链接已停用，本次未启用。请在图片库查看并决定是否启用。' : '图片已存在，已复用原链接。';
+        $('#existing-library').href = item.result.trashed ? uploadApp.dataset.trashUrl : uploadApp.dataset.libraryUrl;
+        $('#existing-library').textContent = item.result.trashed ? '前往回收站管理' : '前往图片库管理';
+        $('#existing-dialog').showModal();
     }
     const compareDialog = $('#compare-dialog');
     function setCompareScale() {
@@ -309,7 +347,7 @@
         const url = URL.createObjectURL(new Blob([content], {type:format === 'csv' ? 'text/csv;charset=utf-8' : 'application/json;charset=utf-8'}));
         const link = createElement('a'); link.href = url; link.download = `yingyu-upload-${new Date().toISOString().replace(/[:.]/g, '-')}.${format}`;
         document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-        exportedSignature = signature(); toast('已发起记录下载；后续状态变化后请重新导出。');
+        exportedSignature = signature(); toast('已开始下载记录。');
     }
     $('#export-csv').addEventListener('click', () => downloadRecords('csv'));
     $('#export-json').addEventListener('click', () => downloadRecords('json'));

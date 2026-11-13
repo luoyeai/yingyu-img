@@ -1,17 +1,19 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\GeetestController;
 use App\Http\Controllers\StorageConfigurationController;
 use App\Http\Controllers\UpdateController;
 use App\Http\Controllers\VaultController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('guest')->group(function () {
-    Route::view('/login', 'login')->name('login');
+    Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
     Route::post('/login', [AuthController::class, 'login']);
 });
 Route::middleware(['auth', 'auth.session'])->group(function () {
     Route::get('/updates', [UpdateController::class, 'index'])->name('updates');
+    Route::post('/updates/check-release', [UpdateController::class, 'checkRelease'])->name('updates.check-release')->middleware('throttle:6,1');
     Route::post('/updates/upload', [UpdateController::class, 'upload'])->name('updates.upload')->middleware('throttle:6,1');
     Route::post('/updates/confirm', [UpdateController::class, 'confirm'])->name('updates.confirm');
     Route::post('/updates/recovery', [UpdateController::class, 'recovery'])->name('updates.recovery');
@@ -32,6 +34,9 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     Route::put('/settings/storage/{configuration}', [StorageConfigurationController::class, 'update'])->name('storage.update');
     Route::delete('/settings/storage/{configuration}', [StorageConfigurationController::class, 'destroy'])->name('storage.destroy');
     Route::post('/settings/storage/{configuration}/test', [StorageConfigurationController::class, 'test'])->name('storage.test')->middleware('throttle:6,1');
+    Route::put('/settings/geetest', [GeetestController::class, 'save'])->name('geetest.save');
+    Route::post('/settings/geetest/test', [GeetestController::class, 'test'])->name('geetest.test')->middleware('throttle:6,1')->block(15, 10);
+    Route::put('/settings/geetest/activation', [GeetestController::class, 'activation'])->name('geetest.activation')->block(15, 10);
     Route::get('/settings', [VaultController::class, 'settings'])->name('settings');
     Route::put('/settings', [VaultController::class, 'saveSettings'])->name('settings.save');
     Route::post('/settings/clean-originals', [VaultController::class, 'cleanOriginals'])->name('originals.clean');

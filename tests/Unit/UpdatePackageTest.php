@@ -202,10 +202,10 @@ class UpdatePackageTest extends TestCase
     public function test_current_official_archives_match_source_manifests_and_locked_production_vendor(): void
     {
         $project = dirname(__DIR__, 2);
-        $fullPath = $project.'/release/image-vault-20261030-update-v1-1-4-production.zip';
-        $signedPath = $project.'/release/image-vault-1.1.4-signed-update.zip';
+        $fullPath = $project.'/.tools/qa/update-build-1.0.5-20261031/image-vault-20261031-update-v1-0-5-production.zip';
+        $signedPath = $project.'/release/local-v1.0.5/image-vault-1.0.5-signed-update.zip';
         if (! is_file($fullPath) || ! is_file($signedPath)) {
-            $this->markTestSkipped('Build both official 1.1.4 artifacts before acceptance.');
+            $this->markTestSkipped('Build the internal 1.0.5 staging archive and local signed update before acceptance.');
         }
         $full = new ZipArchive;
         $signed = new ZipArchive;
@@ -214,8 +214,8 @@ class UpdatePackageTest extends TestCase
         $manifestBody = $signed->getFromName('manifest.json');
         $manifest = json_decode($manifestBody, true, 64, JSON_THROW_ON_ERROR);
         $this->assertSame(1, openssl_verify($manifestBody, base64_decode(trim($signed->getFromName('signature.txt')), true), file_get_contents($project.'/bootstrap/update-public.pem'), OPENSSL_ALGO_SHA256));
-        $this->assertSame('1.1.4', $manifest['program']);
-        $this->assertSame(['min' => '1.1.1', 'max' => '1.1.3'], $manifest['compatible']);
+        $this->assertSame('1.0.5', $manifest['program']);
+        $this->assertSame(['min' => '1.0.0', 'max' => '1.0.4'], $manifest['compatible']);
         $this->assertFalse($manifest['media_migrations']);
         $files = [];
         $errors = [];
@@ -259,7 +259,7 @@ class UpdatePackageTest extends TestCase
         ksort($hashes);
         $this->assertSame($expectedHashes, $hashes);
         $release = json_decode($full->getFromName('image-vault/release.json'), true, 64, JSON_THROW_ON_ERROR);
-        $this->assertSame('1.1.4', $release['program']);
+        $this->assertSame('1.0.5', $release['program']);
         $managed = $release['managed_files'];
         sort($managed);
         $names = array_keys($files);
@@ -278,7 +278,7 @@ class UpdatePackageTest extends TestCase
         $this->assertCount(82, $actual);
         $this->assertSame([], array_intersect(array_column($lock['packages-dev'], 'name'), array_keys($actual)));
         $build = json_decode($full->getFromName('image-vault/BUILD.json'), true, 64, JSON_THROW_ON_ERROR);
-        $this->assertSame('2026-10-30', $build['release_date']);
+        $this->assertSame('2026-10-31', $build['release_date']);
         $this->assertSame(hash_file('sha256', $project.'/composer.lock'), $build['composer_lock_sha256']);
         $this->assertCount(4, $build['omitted_upstream_ci_files']);
         for ($index = 0; $index < $signed->numFiles; $index++) {

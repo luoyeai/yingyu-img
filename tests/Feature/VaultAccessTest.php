@@ -111,6 +111,33 @@ class VaultAccessTest extends TestCase
         $this->post('/login', ['email' => $user->email, 'password' => 'Replacement-password-93!'])->assertRedirect('/');
     }
 
+    public function test_new_passwords_reject_bcrypt_truncation_and_control_characters_but_accept_the_byte_boundary(): void
+    {
+        $user = $this->administrator();
+        $this->actingAs($user);
+        foreach ([str_repeat('x', 73), str_repeat('密', 25), 'Fixture-password-93!'."\0"] as $password) {
+            $this->putJson('/password', ['current_password' => 'Fixture-password-81!', 'password' => $password, 'password_confirmation' => $password])
+                ->assertUnprocessable()->assertJsonValidationErrors('password');
+            $this->assertTrue(Hash::check('Fixture-password-81!', $user->fresh()->password));
+        }
+        $password = str_repeat('密', 24);
+        $this->put('/password', ['current_password' => 'Fixture-password-81!', 'password' => $password, 'password_confirmation' => $password])
+            ->assertRedirect()->assertSessionHasNoErrors();
+        $this->assertTrue(Hash::check($password, $user->fresh()->password));
+    }
+
+    public function test_existing_long_multibyte_passwords_can_still_log_in_and_be_changed(): void
+    {
+        $password = str_repeat('密', 50);
+        $user = $this->administrator();
+        $user->update(['password' => Hash::make($password)]);
+        $this->post('/login', ['email' => $user->email, 'password' => $password])->assertRedirect('/');
+        $this->assertAuthenticatedAs($user);
+        $this->put('/password', ['current_password' => $password, 'password' => 'Replacement-password-93!', 'password_confirmation' => 'Replacement-password-93!'])
+            ->assertRedirect()->assertSessionHasNoErrors();
+        $this->assertTrue(Hash::check('Replacement-password-93!', $user->fresh()->password));
+    }
+
     public function test_deleting_group_moves_active_and_trashed_images_to_ungrouped_without_changing_paths(): void
     {
         $this->actingAs($this->administrator());

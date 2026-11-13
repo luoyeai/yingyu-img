@@ -40,7 +40,7 @@ class ImageStorage
     private function uploadToConfiguration(UploadedFile $file, array $options, ?int $groupId, StorageConfiguration $configuration): array
     {
         $result = $this->processor->process($file, $options);
-        $published = [];
+        $operation = null;
         $lock = null;
         try {
             $lock = $this->lock(substr($result['fingerprint'], 0, 2));
@@ -56,17 +56,20 @@ class ImageStorage
             }
             $contentHash = hash_file('sha256', $result['temp_path']);
             $path = $this->newPath();
-            $image = DB::transaction(function () use ($file, $groupId, $path, $result, $configuration, $contentHash, &$published): Image {
-                $this->publish($result['temp_path'], $this->publicPath($path), $published);
-                $this->publish($result['preview_temp_path'], $this->privatePath('previews', $path), $published);
-                $originalPath = null;
-                if ($result['processing']['keep_original']) {
-                    $originalPath = substr($path, 0, -4).$result['source_extension'];
-                    $this->copyFile($file->getPathname(), $this->privatePath('originals', $originalPath), $published);
+            $originalPath = $result['processing']['keep_original'] ? substr($path, 0, -4).$result['source_extension'] : null;
+            $operation = $this->remote->begin($configuration, 'local_upload_cleanup', $path, null,
+                $this->localCreationPayload(['public_path' => $result['temp_path'], 'preview_path' => $result['preview_temp_path'],
+                    'original_path' => $originalPath ? $file->getPathname() : null],
+                    ['public_path' => $path, 'preview_path' => $path, 'original_path' => $originalPath]), $result['fingerprint']);
+            $image = DB::transaction(function () use ($file, $groupId, $path, $originalPath, $result, $configuration, $contentHash, $operation): Image {
+                $this->publish($result['temp_path'], $this->publicPath($path));
+                $this->publish($result['preview_temp_path'], $this->privatePath('previews', $path));
+                if ($originalPath) {
+                    $this->copyFile($file->getPathname(), $this->privatePath('originals', $originalPath));
                 }
                 $originalName = mb_substr(basename(str_replace('\\', '/', $file->getClientOriginalName())), 0, 255);
 
-                return Image::create([
+                $image = Image::create([
                     'storage_configuration_id' => $configuration->id, 'content_sha256' => $contentHash,
                     'original_name' => $originalName,
                     'display_name' => $originalName,
@@ -88,11 +91,16 @@ class ImageStorage
                     'fingerprint' => $result['fingerprint'],
                     'processing' => $result['processing'],
                 ]);
+                DB::table('storage_operations')->where('id', $operation)->delete();
+
+                return $image;
             });
 
             return ['image' => $image, 'duplicate' => false, 'trashed' => false];
         } catch (Throwable $exception) {
-            $this->removePublished($published);
+            if ($operation !== null) {
+                $this->reconcileLocalCreation($operation, $exception);
+            }
             throw $exception;
         } finally {
             $this->processor->cleanup($result);
@@ -227,19 +235,23 @@ class ImageStorage
 
     private function duplicateLocal(Image $image, ?int $groupId = null): Image
     {
-        $published = [];
+        $path = $this->newPath();
+        $originalPath = $image->original_path ? substr($path, 0, -4).pathinfo($image->original_path, PATHINFO_EXTENSION) : null;
+        $publicArea = $image->disabled_at ? 'disabled_path' : 'public_path';
+        $operation = $this->remote->begin($image->storageConfiguration, 'local_upload_cleanup', $path, null,
+            $this->localCreationPayload([$publicArea => $image->disabled_at ? $this->privatePath('disabled', $image->path) : $this->publicPath($image->path),
+                'preview_path' => $this->privatePath('previews', $image->preview_path),
+                'original_path' => $originalPath ? $this->privatePath('originals', $image->original_path) : null],
+                [$publicArea => $path, 'preview_path' => $path, 'original_path' => $originalPath]));
         try {
-            return DB::transaction(function () use ($image, $groupId, &$published): Image {
+            return DB::transaction(function () use ($image, $groupId, $path, $originalPath, $operation): Image {
                 $record = Image::query()->lockForUpdate()->findOrFail($image->id);
-                $path = $this->newPath();
                 $source = $record->disabled_at ? $this->privatePath('disabled', $record->path) : $this->publicPath($record->path);
                 $destination = $record->disabled_at ? $this->privatePath('disabled', $path) : $this->publicPath($path);
-                $this->copyFile($source, $destination, $published);
-                $this->copyFile($this->privatePath('previews', $record->preview_path), $this->privatePath('previews', $path), $published);
-                $originalPath = null;
-                if ($record->original_path) {
-                    $originalPath = substr($path, 0, -4).pathinfo($record->original_path, PATHINFO_EXTENSION);
-                    $this->copyFile($this->privatePath('originals', $record->original_path), $this->privatePath('originals', $originalPath), $published);
+                $this->copyFile($source, $destination);
+                $this->copyFile($this->privatePath('previews', $record->preview_path), $this->privatePath('previews', $path));
+                if ($originalPath) {
+                    $this->copyFile($this->privatePath('originals', $record->original_path), $this->privatePath('originals', $originalPath));
                 }
                 $copy = $record->replicate();
                 $copy->fill([
@@ -251,13 +263,42 @@ class ImageStorage
                     'fingerprint' => null,
                 ]);
                 $copy->save();
+                DB::table('storage_operations')->where('id', $operation)->delete();
 
                 return $copy;
             });
         } catch (Throwable $exception) {
-            $this->removePublished($published);
-            throw $exception;
+            $this->reconcileLocalCreation($operation, $exception);
         }
+    }
+
+    /** @param array<string,?string> $sources
+     * @param  array<string,?string>  $paths
+     * @return array<string,mixed>
+     */
+    private function localCreationPayload(array $sources, array $paths): array
+    {
+        $files = [];
+        foreach ($sources as $field => $source) {
+            if ($source !== null) {
+                if (! is_file($source)) {
+                    throw new InvalidArgumentException('图片源文件不存在，无法创建本地保存任务。');
+                }
+                $files[$field] = ['bytes' => filesize($source), 'sha256' => hash_file('sha256', $source)];
+            }
+        }
+
+        return [...$paths, 'files' => $files];
+    }
+
+    private function reconcileLocalCreation(int $operation, Throwable $failure): never
+    {
+        try {
+            $this->remote->execute($operation);
+        } catch (Throwable) {
+            throw new UploadFailure('本地保存结果尚未确认；文件与操作记录已保留，请在设置中重试存储操作。', 'storage_pending');
+        }
+        throw $failure;
     }
 
     public function publicPath(string $path): string
@@ -284,35 +325,12 @@ class ImageStorage
 
             return;
         }
-        $moved = null;
-        try {
-            DB::transaction(function () use ($image, $disabled, &$moved): void {
-                $record = Image::withTrashed()->lockForUpdate()->findOrFail($image->id);
-                if ((bool) $record->disabled_at === $disabled) {
-                    return;
-                }
-                $public = $this->publicPath($record->path);
-                $private = $this->privatePath('disabled', $record->path);
-                [$source, $destination] = $disabled ? [$public, $private] : [$private, $public];
-                if (! is_file($source)) {
-                    throw new InvalidArgumentException('图片文件不存在，无法'.($disabled ? '停用' : '恢复').'链接。');
-                }
-                $this->ensureDirectory(dirname($destination), $disabled ? 0700 : 0755);
-                if (file_exists($destination) || ! rename($source, $destination)) {
-                    throw new RuntimeException('无法切换图片链接状态，请检查目录权限。');
-                }
-                $moved = [$source, $destination];
-                chmod($destination, $disabled ? 0600 : 0644);
-                $record->disabled_at = $disabled ? now() : null;
-                $record->save();
-            });
-        } catch (Throwable $exception) {
-            if ($moved && is_file($moved[1])) {
-                rename($moved[1], $moved[0]);
-                chmod($moved[0], $disabled ? 0644 : 0600);
-            }
-            throw $exception;
+        if ((bool) $image->disabled_at === $disabled) {
+            return;
         }
+        $operation = $this->remote->begin($image->storageConfiguration, $disabled ? 'local_disable' : 'local_enable', $image->path, $image->id,
+            ['bytes' => $image->bytes, 'sha256' => $image->content_sha256]);
+        $this->remote->execute($operation);
         $image->refresh();
     }
 
@@ -349,7 +367,7 @@ class ImageStorage
         return $handle;
     }
 
-    private function publish(string $temporary, string $destination, array &$published): void
+    private function publish(string $temporary, string $destination): void
     {
         $this->ensureDirectory(dirname($destination), str_starts_with($destination, public_path('media/')) ? 0755 : 0700);
         $lock = $this->lock('publish');
@@ -360,15 +378,16 @@ class ImageStorage
             if (file_exists($destination) || ! rename($temporary, $destination)) {
                 throw new RuntimeException('无法原子保存图片文件。');
             }
-            $published[] = $destination;
-            chmod($destination, str_starts_with($destination, public_path('media/')) ? 0644 : 0600);
+            if (! chmod($destination, str_starts_with($destination, public_path('media/')) ? 0644 : 0600)) {
+                throw new RuntimeException('无法设置图片文件权限，已保留清理记录。');
+            }
         } finally {
             flock($lock, LOCK_UN);
             fclose($lock);
         }
     }
 
-    private function copyFile(string $source, string $destination, array &$published): void
+    private function copyFile(string $source, string $destination): void
     {
         if (! is_file($source)) {
             throw new InvalidArgumentException('图片源文件不存在，无法复制。');
@@ -379,7 +398,7 @@ class ImageStorage
             if (! copy($source, $temporary) || filesize($source) !== filesize($temporary) || hash_file('sha256', $source) !== hash_file('sha256', $temporary)) {
                 throw new RuntimeException('图片复制校验失败。');
             }
-            $this->publish($temporary, $destination, $published);
+            $this->publish($temporary, $destination);
         } finally {
             if (is_file($temporary)) {
                 unlink($temporary);
@@ -391,15 +410,6 @@ class ImageStorage
     {
         if (! is_dir($directory) && ! mkdir($directory, $mode, true) && ! is_dir($directory)) {
             throw new RuntimeException('无法创建图片存储目录。');
-        }
-    }
-
-    private function removePublished(array $paths): void
-    {
-        foreach (array_reverse($paths) as $path) {
-            if (is_file($path)) {
-                unlink($path);
-            }
         }
     }
 }

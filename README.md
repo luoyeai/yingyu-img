@@ -38,7 +38,7 @@
 
 ### 1. 下载安装包
 
-在 [Releases](https://github.com/luoyeai/yingyu-img/releases/latest) 下载 **`yingyu-img-1.0.0.zip`**。完整包已包含生产依赖，无需安装 Composer 或 Node。GitHub 自动生成的 `Source code` 是源码包，请选择上面的完整安装包。
+在 [Releases](https://github.com/luoyeai/yingyu-img/releases/latest) 下载 **`yingyu-img-1.1.0.zip`**。完整包已包含生产依赖，无需安装 Composer 或 Node。GitHub 自动生成的 `Source code` 是源码包，请选择上面的完整安装包。
 
 ### 2. 宝塔创建网站
 
@@ -98,6 +98,16 @@ location / {
 不要预先创建 `.env`、生成 APP_KEY 或手动迁移数据库；安装向导会自动完成。不要执行 `storage:link` 或设置 `777` 权限。
 
 本完整包用于新站安装，安装后入口自动锁定。已有站点请先备份并使用兼容的更新包，不要覆盖安装或降级。
+
+## 升级到 1.1.0
+
+1.1.0 精简设置与存储配置布局，图片库和回收站点击图片可打开详情，并包含存储提交一致性、密码字节边界及恢复引擎 OPcache 修复。
+
+- **新站**：下载 `yingyu-img-1.1.0.zip`，已包含锁定生产依赖，按上方教程安装。
+- **当前为正式 1.0.5 的站点**：先独立备份数据库、配置和媒体，再在后台“系统更新”上传 `image-vault-1.1.0-signed-update.zip`，检查通过后确认升级。
+- **1.0.0–1.0.4、其他版本或未知基线**：本次签名包不适用；不要覆盖完整包或修改版本记录绕过检查。同版本重装和降级也不支持。
+
+数据库迁移清单保持八项；更新包不包含站点配置、数据库或图片。下载后可用 Release 附带的 `SHA256SUMS` 校验文件。
 
 ## 目录
 

@@ -32,22 +32,24 @@ function uploadPage() {
         if (!nodes.has(selector)) nodes.set(selector, new Element());
         return nodes.get(selector);
     };
-    node('#upload-app').dataset = {options:JSON.stringify({quality:90, max_edge:0, lossless:0, batch_limit:50, max_file_mb:100}), endpoint:'/upload'};
+    node('#upload-app').dataset = {options:JSON.stringify({quality:90, max_edge:0, lossless:0, batch_limit:50, max_file_mb:100}), endpoint:'/upload', libraryUrl:'/library', trashUrl:'/trash'};
     node('#upload-preset').value = 'standard';
     const events = {};
     const issued = [];
     const revoked = [];
     const confirmations = [];
+    const copied = [];
     const window = {
         VaultUpload:{...globalThis.VaultUpload, Queue:class extends globalThis.VaultUpload.Queue {
             constructor(...args) { super(...args); queue = this; }
         }},
         addEventListener:(name, handler) => { events[name] = handler; },
         confirm:message => { confirmations.push(message); return false; },
+        isSecureContext:true,
     };
     const document = {querySelector:node, querySelectorAll:() => [], createElement:() => new Element(), addEventListener() {}, body:new Element()};
     vm.runInNewContext(fs.readFileSync(require.resolve('../../public/assets/app.js'), 'utf8'), {
-        window, document, Element, navigator:{}, localStorage:{getItem() { return null; }}, Blob,
+        window, document, Element, navigator:{clipboard:{writeText:async text => { copied.push(text); }}}, localStorage:{getItem() { return null; }}, Blob,
         URL:{createObjectURL:() => { const url = 'blob:' + issued.length; issued.push(url); return url; }, revokeObjectURL:url => revoked.push(url)},
         setTimeout:(callback, delay) => delay === 0 ? setTimeout(callback, 0) : 1, clearTimeout() {},
     });
@@ -63,7 +65,7 @@ function uploadPage() {
         events.beforeunload({preventDefault() { prevented = true; }});
         return prevented;
     };
-    return {queue, node, events, issued, revoked, confirmations, window, add, navigate};
+    return {queue, node, events, issued, revoked, confirmations, copied, window, add, navigate};
 }
 
 module.exports = async () => {
@@ -124,14 +126,64 @@ module.exports = async () => {
     const template = fs.readFileSync(require.resolve('../../resources/views/upload.blade.php'), 'utf8');
     assert.ok(!template.includes('choose-folder') && !template.includes('folder-input'));
     assert.ok(!template.includes('每批最多'));
+    const descendants = element => [element, ...element.children.flatMap(descendants)];
+    for (const availability of ['active', 'trashed', 'disabled', 'both']) {
+        const duplicatePage = uploadPage();
+        const duplicate = duplicatePage.add(availability === 'active' ? 'reused' : 'unavailable');
+        duplicate.result = {image:{id:71, display_name:'Original <name>', original_name:'first.webp', group_id:9, disabled_at:['disabled','both'].includes(availability) ? '2026-10-30' : null, url:'https://example.test/71.webp', preview_url:'/preview/71', source_width:10, source_height:10, width:10, height:10, source_bytes:100, bytes:70}, duplicate:true, trashed:['trashed','both'].includes(availability)};
+        duplicatePage.queue.notify();
+        const elements = descendants(duplicate.element);
+        assert.ok(duplicatePage.node('#queue-summary').textContent.includes('新增 0 · 重复 1 · 失败 0'));
+        assert.equal(elements.some(element => element.textContent === '复制链接'), availability === 'active');
+        assert.equal(elements.some(element => element.textContent === '局部对比'), availability === 'active');
+        assert.equal(elements.some(element => element.className === 'result-link'), availability === 'active');
+        const view = elements.find(element => element.textContent === '查看原记录');
+        assert.ok(view);
+        view.click();
+        assert.equal(duplicatePage.node('#existing-name').textContent, 'Original <name>');
+        assert.ok(duplicatePage.node('#existing-meta').textContent.includes('记录 #71'));
+        assert.equal(duplicatePage.node('#existing-library').href, duplicate.result.trashed ? '/trash' : '/library');
+        assert.ok(duplicatePage.node('#existing-status').textContent.includes(duplicate.result.trashed ? '本次未恢复' : availability === 'disabled' ? '本次未启用' : '图片已存在，已复用原链接'));
+        const record = globalThis.VaultUpload.records([duplicate])[0];
+        assert.equal(record.url, availability === 'active' ? duplicate.result.image.url : '');
+        assert.equal(record.duplicate, true);
+        assert.equal(record.link_available, availability === 'active');
+    }
     const page = uploadPage();
     const item = page.add('done');
+    item.format = 'PNG';
     item.result = {image:{id:1, url:'https://example.test/1.webp', preview_url:'/preview/1', source_width:10, source_height:10, width:10, height:10, source_bytes:100, bytes:70}, duplicate:false, trashed:false};
+    item.result.image.url = 'https://example.test/' + 'long-directory/'.repeat(30) + '1.webp';
+    item.result.image.alt = '<script>alert("fixture")</script>';
     page.queue.notify();
+    let actions = item.element.children.at(-1);
+    let link = actions.children.find(element => element.className === 'result-link');
+    let format = actions.children[0];
+    const copy = () => actions.children.find(element => element.textContent === '复制链接').click();
+    assert.equal(link.textContent, item.result.image.url);
+    assert.equal(link.title, item.result.image.url);
+    assert.equal(link['aria-readonly'], 'true');
+    assert.equal(actions.children.indexOf(link) + 1, actions.children.findIndex(element => element.textContent === '复制链接'));
+    copy();
+    assert.equal(page.copied.at(-1), item.result.image.url, 'copy includes the full long URL');
+    format.value = 'html'; format.events.change();
+    assert.equal(item.format, 'PNG', 'link format must not change the source format used in exports');
+    assert.ok(link.textContent.startsWith('<img src="'));
+    assert.ok(link.textContent.includes('&lt;script&gt;'));
+    assert.equal(link.children.length, 0, 'HTML format is displayed as text');
+    copy(); assert.equal(page.copied.at(-1), link.textContent);
+    page.queue.notify();
+    actions = item.element.children.at(-1);
+    link = actions.children.find(element => element.className === 'result-link');
+    format = actions.children[0];
+    assert.equal(format.value, 'html', 'queue rendering preserves the chosen format');
+    format.value = 'markdown'; format.events.change();
+    assert.ok(link.textContent.startsWith('!['));
+    copy(); assert.equal(page.copied.at(-1), link.textContent);
     assert.equal(page.navigate(), true, 'completed unexported records need an unload warning');
     page.node('#export-csv').click();
     assert.equal(page.navigate(), false, 'completed exported records allow navigation');
-    const descendants = element => [element, ...element.children.flatMap(descendants)];
+    assert.ok(page.node('#queue-summary').textContent.includes('新增 1 · 重复 0'));
     const compare = descendants(item.element).find(element => element.textContent === '局部对比');
     compare.click();
     const original = page.node('#compare-before').src;

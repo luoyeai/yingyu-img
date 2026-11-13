@@ -3,7 +3,7 @@
     'use strict';
     const MAX_RETRIES = 3;
     const FAILURE_LIMIT = 3;
-    const labels = {checking:'检查格式', pending:'未上传', uploading:'处理中', retrying:'等待重试', done:'成功', reused:'复用', unavailable:'链接不可用', error:'失败', uncertain:'结果未确认', cancelled:'已取消'};
+    const labels = {checking:'检查格式', pending:'未上传', uploading:'处理中', retrying:'等待重试', done:'成功', reused:'已复用原链接', unavailable:'链接不可用', error:'失败', uncertain:'结果未确认', cancelled:'已取消'};
     const problem = (code, message, extra = {}) => ({code, message, retryable:false, scope:'file', uncertain:false, status:0, ...extra});
     function retryAfter(value, now = Date.now()) {
         if (!value) return 0;
@@ -124,8 +124,8 @@
             const path = item.sourcePath;
             return {source_id:item.id, relative_directory:path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '', filename:item.file.name,
                 relative_path:path, format:item.format || '', storage_target:item.storageName, storage_configuration_id:item.settings.storage_configuration_id,
-                url:item.result?.image.url || '', status:labels[item.state], code:item.errorCode || (item.result?.trashed ? 'image_trashed' : item.result?.image.disabled_at ? 'image_disabled' : ''),
-                reason:item.error || (item.result?.trashed ? '相同图片在回收站，请先恢复。' : item.result?.image.disabled_at ? '链接已停用，请在图片库恢复。' : ''),
+                url:item.result && !item.result.trashed && !item.result.image.disabled_at ? item.result.image.url : '', status:labels[item.state], code:item.errorCode || (item.result?.trashed ? 'image_trashed' : item.result?.image.disabled_at ? 'image_disabled' : ''),
+                reason:item.error || (item.result?.trashed ? '图片已存在于回收站，本次未恢复，请查看原记录。' : item.result?.image.disabled_at ? '图片已存在但链接已停用，本次未启用，请查看原记录。' : ''),
                 duplicate:Boolean(item.result?.duplicate), link_available:Boolean(item.result && !item.result.trashed && !item.result.image.disabled_at), attempts:item.attempts, automatic_retries:item.retriesUsed,
                 http_status:item.httpStatus || '', result_uncertain:Boolean(item.uncertain)};
         });
@@ -153,7 +153,7 @@
             const item = {id:String(this.nextId++), file, settings:{...settings}, storageName, sourcePath:relativePath({webkitRelativePath:sourcePath}), state:'checking', result:null, error:'', errorCode:'', format:'', attempts:0, retriesUsed:0, retryAt:0, uncertain:false};
             this.items.push(item); return item;
         }
-        pause(reason = '已手动暂停；当前一张会完成，随后停止派发。') { this.paused = true; this.reason = reason; this.wake?.(); this.notify(); }
+        pause(reason = '当前图片处理完成后暂停。') { this.paused = true; this.reason = reason; this.wake?.(); this.notify(); }
         resume() { this.paused = false; this.reason = ''; this.consecutive = 0; return this.run(); }
         retry(item) {
             if (item.invalid || !['error','uncertain'].includes(item.state)) return;

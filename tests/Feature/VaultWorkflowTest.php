@@ -6,6 +6,8 @@ use App\Models\Image;
 use App\Models\Setting;
 use App\Models\User;
 use App\Services\ImageStorage;
+use App\Services\RemoteImageStorage;
+use App\Services\StorageMutex;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\File;
@@ -108,7 +110,7 @@ class VaultWorkflowTest extends TestCase
         $this->assertFileExists(public_path('media/'.$copy->path));
     }
 
-    public function test_failure_compensates_new_upload_and_disable_and_original_cleanup(): void
+    public function test_failed_upload_and_original_cleanup_compensate_while_link_changes_keep_a_retryable_intent(): void
     {
         $storage = app(ImageStorage::class);
         Image::creating(function () {
@@ -127,15 +129,25 @@ class VaultWorkflowTest extends TestCase
         Image::updating(function () {
             throw new \RuntimeException('injected database failure');
         });
-        foreach (['disable', 'deleteOriginal'] as $method) {
+        foreach (['deleteOriginal', 'disable'] as $method) {
             try {
                 $storage->$method($i);
                 $this->fail('must fail');
             } catch (\RuntimeException $e) {
-                $this->assertSame('injected database failure', $e->getMessage());
-            }$this->assertFileExists($public);
+                if ($method === 'disable') {
+                    $this->assertStringContainsString('存储操作结果尚未确认', $e->getMessage());
+                } else {
+                    $this->assertSame('injected database failure', $e->getMessage());
+                }
+            }$this->assertSame($method === 'deleteOriginal', is_file($public));
             $this->assertFileExists($original);
         }Image::flushEventListeners();
+        $this->assertDatabaseHas('storage_operations', ['image_id' => $i->id, 'operation' => 'local_disable']);
+        $this->travel(61)->seconds();
+        app(StorageMutex::class)->run(fn (): array => app(RemoteImageStorage::class)->retryPending());
+        $this->assertDatabaseCount('storage_operations', 0);
+        $this->assertNotNull($i->fresh()->disabled_at);
+        $this->assertFileExists(storage_path('app/disabled/'.$i->path));
     }
 
     public function test_rejects_svg_gif_pixel_limit_and_cleans_thirty_day_trash(): void

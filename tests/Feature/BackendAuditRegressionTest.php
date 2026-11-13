@@ -4,8 +4,11 @@ namespace Tests\Feature;
 
 use App\Models\Image;
 use App\Models\Setting;
+use App\Models\StorageConfiguration;
 use App\Models\User;
 use App\Services\ImageStorage;
+use App\Services\RemoteImageStorage;
+use App\Services\StorageMutex;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\File;
@@ -117,6 +120,27 @@ class BackendAuditRegressionTest extends TestCase
             $this->assertFileExists($public);
             $this->assertFileExists($preview);
         }
+    }
+
+    public function test_local_creation_cleanup_preserves_unreferenced_files_that_do_not_match_the_intent(): void
+    {
+        $path = '2099/01/'.bin2hex(random_bytes(16)).'.webp';
+        $file = public_path('media/'.$path);
+        File::ensureDirectoryExists(dirname($file));
+        file_put_contents($file, 'unknown-file');
+        $remote = app(RemoteImageStorage::class);
+        app(StorageMutex::class)->run(function () use ($remote, $path): void {
+            $operation = $remote->begin(StorageConfiguration::where('driver', 'local')->firstOrFail(), 'local_upload_cleanup', $path, null,
+                ['public_path' => $path, 'files' => ['public_path' => ['bytes' => 12, 'sha256' => hash('sha256', 'trusted-file')]]]);
+            try {
+                $remote->execute($operation);
+                $this->fail('Unknown file content must not be removed.');
+            } catch (RuntimeException) {
+                $this->assertDatabaseHas('storage_operations', ['id' => $operation, 'state' => 'compensating']);
+            }
+        });
+        $this->assertFileExists($file);
+        $this->assertSame('unknown-file', file_get_contents($file));
     }
 
     private function png(): UploadedFile

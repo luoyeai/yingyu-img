@@ -20,12 +20,23 @@ class UpdateWeb
         header('Referrer-Policy: no-referrer');
         header("Content-Security-Policy: default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
         $state = new UpdateState($this->root);
+        if ((($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['action'] ?? '') === 'login')
+            || (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && ($_GET['reauth'] ?? '') === '1')) {
+            $this->login($state);
+
+            return;
+        }
         $grant = $state->read('recovery-grant.json');
         $secret = $_COOKIE['vault_update_recovery'] ?? '';
         if (! is_string($secret) || ! preg_match('/\A[a-f0-9]{64}\z/D', $secret)
             || ! is_array($grant) || ! is_string($grant['hash'] ?? null)
             || ! hash_equals($grant['hash'], hash('sha256', $secret))
             || ! is_int($grant['expires'] ?? null) || $grant['expires'] <= time()) {
+            if (($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'VaultUpdate') {
+                $this->requestFailure(401, 'recovery_auth_required', '恢复授权已失效，请重新验证管理员身份。', '/update-recovery?reauth=1');
+
+                return;
+            }
             $this->login($state);
 
             return;
@@ -43,14 +54,16 @@ class UpdateWeb
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             $submitted = $_POST['csrf'] ?? '';
             if (! is_string($submitted) || ! hash_equals($csrf, $submitted)) {
-                http_response_code(419);
-                echo '恢复请求校验失败。请返回恢复页重试。';
+                $this->requestFailure(419, 'recovery_csrf_expired', '恢复请求校验失败，本次操作未执行。请重新打开恢复页。', '/update-recovery?inspect=1');
 
                 return;
             }
             try {
                 $action = $_POST['action'] ?? '';
                 if ($action === 'advance' && ($grant['confirmed'] ?? false) === true) {
+                    if (($update['status'] ?? '') === 'restoring') {
+                        throw new RuntimeException('恢复尚未完成，不能继续更新；请明确确认恢复程序和数据库备份。');
+                    }
                     $stage = $_POST['stage'] ?? '';
                     if (! is_string($stage) || $stage !== ($update['stage'] ?? null)) {
                         throw new RuntimeException('任务阶段已变化，请刷新页面。');
@@ -98,6 +111,19 @@ class UpdateWeb
         require $template;
     }
 
+    private function requestFailure(int $status, string $code, string $message, string $url): void
+    {
+        http_response_code($status);
+        if (($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'VaultUpdate') {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['ok' => false, 'code' => $code, 'error' => $message, 'recovery_url' => $url], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+
+            return;
+        }
+        $escape = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        echo '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>恢复请求未执行</title><h1>恢复请求未执行</h1><p>'.$escape($message).'</p><p><a href="'.$escape($url).'">重新打开恢复页</a></p><p><a href="/update-recovery?reauth=1">重新验证管理员身份</a></p><p>请勿刷新并重新提交刚才的表单。任务记录与备份继续保留。</p></html>';
+    }
+
     /** @param array<string,mixed> $update
      * @param  array<string,mixed>  $grant
      * @return array<string,mixed>
@@ -137,14 +163,14 @@ class UpdateWeb
         $error = null;
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             if (($_POST['action'] ?? '') !== 'login' || ! is_string($_POST['csrf'] ?? null) || ! hash_equals($csrf, $_POST['csrf'])) {
-                http_response_code(419);
-                echo '恢复登录请求校验失败，请刷新恢复页。';
+                $this->requestFailure(419, 'recovery_login_csrf_expired', '恢复登录请求校验失败，本次登录未执行。请重新打开登录页。', '/update-recovery?reauth=1');
 
                 return;
             }
             $email = $_POST['email'] ?? '';
             $password = $_POST['password'] ?? '';
-            if (! is_string($email) || ! is_string($password) || strlen($email) > 255 || strlen($password) > 128) {
+            if (! is_string($email) || ! is_string($password) || strlen($email) > 255
+                || strlen($password) > 512 || preg_match('/\A.{1,128}\z/usD', $password) !== 1) {
                 http_response_code(422);
                 $error = '邮箱或密码格式不正确。';
             } else {
@@ -184,7 +210,7 @@ class UpdateWeb
                     return 'accepted';
                 });
                 if ($result === 'accepted') {
-                    header('Location: /updates', true, 303);
+                    header('Location: /update-recovery?inspect=1', true, 303);
 
                     return;
                 }

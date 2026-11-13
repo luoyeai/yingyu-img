@@ -165,6 +165,30 @@ class RemoteImageStorage
         try {
             $configuration = StorageConfiguration::findOrFail($operation->storage_configuration_id);
             $payload = json_decode($operation->payload, true, 32, JSON_THROW_ON_ERROR);
+            if ($operation->operation === 'local_upload_cleanup') {
+                if (! Image::withTrashed()->where('storage_configuration_id', $configuration->id)->where('path', $operation->path)->exists()) {
+                    $this->assertLocalCleanupUnreferenced($payload);
+                    foreach (['public_path' => 'public', 'preview_path' => 'previews', 'original_path' => 'originals', 'disabled_path' => 'disabled'] as $field => $area) {
+                        if (! empty($payload[$field]) && is_file($path = $this->local($area, $payload[$field]))) {
+                            $metadata = $payload['files'][$field] ?? [];
+                            if (! is_int($metadata['bytes'] ?? null) || ! is_string($metadata['sha256'] ?? null)
+                                || ! preg_match('/\A[a-f0-9]{64}\z/D', $metadata['sha256'])) {
+                                throw new RuntimeException('本地保存任务缺少文件指纹，拒绝清理。');
+                            }
+                            $this->verifyFile($path, $metadata['bytes'], $metadata['sha256']);
+                        }
+                    }
+                    $this->cleanLocal($payload);
+                }
+                DB::table('storage_operations')->where('id', $id)->delete();
+
+                return;
+            }
+            if (in_array($operation->operation, ['local_disable', 'local_enable'], true)) {
+                $this->executeLocalAvailability($operation, $configuration, $payload);
+
+                return;
+            }
             if ($localCleanup) {
                 if ($operation->state === 'committed') {
                     $this->assertLocalCleanupUnreferenced($payload);
@@ -243,13 +267,45 @@ class RemoteImageStorage
                 $this->execute($id);
             }
         } catch (Throwable) {
-            DB::table('storage_operations')->where('id', $id)->update(['state' => DB::table('storage_operations')->where('id', $id)->value('state') === 'committed' ? 'committed' : ($localCleanup ? $operation->state : (in_array($operation->operation, ['upload_cleanup', 'test_cleanup'], true) ? 'compensating' : 'unknown')),
+            DB::table('storage_operations')->where('id', $id)->update(['state' => DB::table('storage_operations')->where('id', $id)->value('state') === 'committed' ? 'committed' : ($localCleanup ? $operation->state : (in_array($operation->operation, ['upload_cleanup', 'test_cleanup', 'local_upload_cleanup'], true) ? 'compensating' : 'unknown')),
                 'attempts' => DB::raw('attempts + 1'), 'error_code' => 'storage_operation_failed', 'next_attempt_at' => now()->addMinute(), 'updated_at' => now()]);
             if ($localCleanup) {
                 throw new RuntimeException('本地文件清理尚未完成，已保留操作记录，请在设置中重试。');
             }
             throw new RuntimeException('存储操作结果尚未确认，图片记录与安全副本已保留，请在设置中重试。');
         }
+    }
+
+    /** A durable intent is removed with the database change; an uncertain commit never reverses the file move. */
+    private function executeLocalAvailability(object $operation, StorageConfiguration $configuration, array $payload): void
+    {
+        $image = Image::withTrashed()->findOrFail($operation->image_id);
+        if ($configuration->driver !== 'local' || $image->storage_configuration_id !== $configuration->id || $image->path !== $operation->path) {
+            throw new RuntimeException('本地图片归属已变化，拒绝继续。');
+        }
+        $disabled = $operation->operation === 'local_disable';
+        $public = $this->local('public', $image->path);
+        $private = $this->local('disabled', $image->path);
+        [$source, $destination] = $disabled ? [$public, $private] : [$private, $public];
+        if (is_file($source)) {
+            $this->verifyFile($source, $payload['bytes'], $payload['sha256']);
+            if (! is_dir(dirname($destination)) && ! mkdir(dirname($destination), $disabled ? 0700 : 0755, true) && ! is_dir(dirname($destination))) {
+                throw new RuntimeException('无法创建本地图片目录，操作记录已保留。');
+            }
+            if (file_exists($destination) || ! rename($source, $destination)) {
+                throw new RuntimeException('无法切换本地图片链接，操作记录已保留。');
+            }
+        }
+        $this->verifyFile($destination, $payload['bytes'], $payload['sha256']);
+        if (! chmod($destination, $disabled ? 0600 : 0644)) {
+            throw new RuntimeException('无法设置本地图片权限，操作记录已保留。');
+        }
+        DB::transaction(function () use ($image, $disabled, $operation): void {
+            $record = Image::withTrashed()->lockForUpdate()->findOrFail($image->id);
+            $record->disabled_at = $disabled ? ($record->disabled_at ?? now()) : null;
+            $record->save();
+            DB::table('storage_operations')->where('id', $operation->id)->delete();
+        });
     }
 
     public function verifyFile(string $path, int $bytes, ?string $hash): void

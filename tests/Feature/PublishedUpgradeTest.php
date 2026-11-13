@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Group;
+use App\Models\Image;
 use App\Models\Setting;
 use App\Models\User;
 use App\Services\Installation\EnvFile;
@@ -13,6 +14,7 @@ use Illuminate\Encryption\Encrypter;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Foundation\Testing\DatabaseMigrations;
 use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 use ZipArchive;
 
@@ -265,6 +267,106 @@ PHP, [base_path('release/local-v1.0.3/image-vault-1.0.3-signed-update.zip'), bas
         $this->assertPreserved($root);
     }
 
+    /** @return array<string,array{string}> */
+    public static function crossVersionBaselines(): array
+    {
+        return array_combine(
+            array_map(fn (int $patch): string => '1.0.'.$patch, range(0, 5)),
+            array_map(fn (int $patch): array => ['1.0.'.$patch], range(0, 5)),
+        );
+    }
+
+    #[DataProvider('crossVersionBaselines')]
+    public function test_published_engines_upgrade_directly_to_110_and_preserve_data(string $version): void
+    {
+        $root = $this->baseline($version);
+        $configuration = $this->enableGeetest();
+        $image = $this->crossVersionImage($root);
+        $environmentHash = hash_file('sha256', $root.'/.env');
+        $mediaHash = hash_file('sha256', $root.'/public/media/fixture.webp');
+        $result = $this->exercise($root, '1.1.0', false);
+        $this->assertSame('complete', $result['status'], $result['failure'] ?? '');
+        $this->assertSame('complete', $result['stage']);
+        $this->assertSame('1.1.0', $result['version']);
+        $this->assertSame(['prepared', 'files', 'migrate', 'health'], $result['stages']);
+        $this->assertSame($environmentHash, hash_file('sha256', $root.'/.env'));
+        $this->assertSame($mediaHash, hash_file('sha256', $root.'/public/media/fixture.webp'));
+        $this->assertSame($configuration, Setting::value('geetest'));
+        $this->assertPreserved($root);
+        $this->assertCrossVersionImagePreserved($root, $image);
+        $this->assertSame('1.1.0', json_decode(file_get_contents($root.'/release.json'), true, 64, JSON_THROW_ON_ERROR)['program']);
+    }
+
+    /** @return array<string,array{string}> */
+    public static function crossVersionRecoveryBaselines(): array
+    {
+        return ['oldest' => ['1.0.0'], 'latest' => ['1.0.5']];
+    }
+
+    #[DataProvider('crossVersionRecoveryBaselines')]
+    public function test_cross_version_health_failure_restores_the_published_baseline(string $version): void
+    {
+        $root = $this->baseline($version);
+        $configuration = $this->enableGeetest();
+        $image = $this->crossVersionImage($root);
+        $environmentHash = hash_file('sha256', $root.'/.env');
+        $mediaHash = hash_file('sha256', $root.'/public/media/fixture.webp');
+        $runnerHash = hash_file('sha256', $root.'/app/Services/Updates/UpdateRunner.php');
+        $result = $this->exercise($root, '1.1.0', true, true);
+        $this->assertSame('failed', $result['status']);
+        $this->assertSame('health', $result['stage']);
+        $this->assertSame('restored', $result['restored'], $result['failure'] ?? '');
+        $this->assertSame($version, $result['version']);
+        $this->assertSame($environmentHash, hash_file('sha256', $root.'/.env'));
+        $this->assertSame($mediaHash, hash_file('sha256', $root.'/public/media/fixture.webp'));
+        $this->assertSame($runnerHash, hash_file('sha256', $root.'/app/Services/Updates/UpdateRunner.php'));
+        $this->assertSame($configuration, Setting::value('geetest'));
+        $this->assertPreserved($root);
+        $this->assertCrossVersionImagePreserved($root, $image);
+        $retry = $this->exercise($root, '1.1.0', false);
+        $this->assertSame('complete', $retry['status'], $retry['failure'] ?? '');
+        $this->assertSame('1.1.0', $retry['version']);
+        $this->assertPreserved($root);
+        $this->assertCrossVersionImagePreserved($root, $image);
+    }
+
+    /** @return array{record:array<string,mixed>,files:array<string,string>} */
+    private function crossVersionImage(string $root): array
+    {
+        $path = '2026/11/'.str_repeat('1', 32).'.webp';
+        $preview = 'previews/'.str_repeat('2', 32).'.webp';
+        $original = 'originals/'.str_repeat('3', 32).'.webp';
+        $files = [];
+        foreach (['public/media/'.$path, 'storage/app/'.$preview, 'storage/app/'.$original] as $relative) {
+            if (! is_dir(dirname($root.'/'.$relative))) {
+                mkdir(dirname($root.'/'.$relative), 0700, true);
+            }
+            copy($root.'/public/media/fixture.webp', $root.'/'.$relative);
+            $files[$relative] = hash_file('sha256', $root.'/'.$relative);
+        }
+        $image = Image::create([
+            'group_id' => Group::where('name', 'Preserved fixture group')->value('id'),
+            'original_name' => 'retained.webp', 'display_name' => '跨版本保留图片', 'alt' => '保留说明',
+            'path' => $path, 'preview_path' => $preview, 'original_path' => $original,
+            'mime' => 'image/webp', 'source_width' => 2, 'source_height' => 2, 'width' => 2, 'height' => 2,
+            'source_bytes' => filesize($root.'/public/media/'.$path), 'bytes' => filesize($root.'/public/media/'.$path),
+            'original_bytes' => filesize($root.'/storage/app/'.$original), 'preview_bytes' => filesize($root.'/storage/app/'.$preview),
+            'source_hash' => hash_file('sha256', $root.'/public/media/'.$path), 'fingerprint' => str_repeat('4', 64),
+            'processing' => ['quality' => 82],
+        ]);
+
+        return ['record' => (array) DB::table('images')->where('id', $image->id)->first(), 'files' => $files];
+    }
+
+    /** @param array{record:array<string,mixed>,files:array<string,string>} $image */
+    private function assertCrossVersionImagePreserved(string $root, array $image): void
+    {
+        $this->assertSame($image['record'], (array) DB::table('images')->where('id', $image['record']['id'])->first());
+        foreach ($image['files'] as $relative => $hash) {
+            $this->assertSame($hash, hash_file('sha256', $root.'/'.$relative));
+        }
+    }
+
     private function enableGeetest(): array
     {
         $encrypter = new Encrypter(base64_decode(substr($this->fixtureKey, 7)), config('app.cipher'));
@@ -293,18 +395,46 @@ PHP, [base_path('release/local-v1.0.3/image-vault-1.0.3-signed-update.zip'), bas
         return ['exit' => proc_close($process), 'output' => $output];
     }
 
-    private function baseline(): string
+    private function baseline(string $version = '1.0.0'): string
     {
         $this->sandbox = sys_get_temp_dir().'/yingyu-published-upgrade-'.bin2hex(random_bytes(8));
         mkdir($this->sandbox, 0700, true);
         $zip = new ZipArchive;
-        $this->assertTrue($zip->open(base_path('release/github-v1.0.0/yingyu-img-1.0.0.zip')));
-        $this->assertTrue($zip->extractTo($this->sandbox));
-        $zip->close();
+        $archive = match ($version) {
+            '1.0.0' => 'release/github-v1.0.0/yingyu-img-1.0.0.zip',
+            '1.0.1' => 'release/github-v1.0.1/image-vault-20261030-opensource-v1-0-1-production.zip',
+            '1.0.2' => 'release/github-v1.0.2/image-vault-20261030-opensource-v1-0-2-production.zip',
+            default => 'release/local-v'.$version.'/image-vault-'.$version.'-signed-update.zip',
+        };
+        $this->assertTrue($zip->open(base_path($archive), ZipArchive::CHECKCONS));
         $root = $this->sandbox.'/image-vault';
+        if (in_array($version, ['1.0.0', '1.0.1', '1.0.2'], true)) {
+            $this->assertTrue($zip->extractTo($this->sandbox));
+        } else {
+            $manifestBody = $zip->getFromName('manifest.json');
+            $this->assertSame(1, openssl_verify($manifestBody, base64_decode(trim($zip->getFromName('signature.txt')), true), file_get_contents(base_path('bootstrap/update-public.pem')), OPENSSL_ALGO_SHA256));
+            $manifest = json_decode($manifestBody, true, 64, JSON_THROW_ON_ERROR);
+            foreach ($manifest['files'] as $path => $metadata) {
+                $body = $zip->getFromName('payload/'.$path);
+                $this->assertSame($metadata['sha256'], hash('sha256', $body));
+                if (! is_dir(dirname($root.'/'.$path))) {
+                    mkdir(dirname($root.'/'.$path), 0755, true);
+                }
+                file_put_contents($root.'/'.$path, $body);
+                chmod($root.'/'.$path, 0644);
+            }
+            foreach (['bootstrap/cache', 'storage/framework/sessions', 'storage/framework/views', 'storage/framework/cache/data', 'storage/logs'] as $directory) {
+                if (! is_dir($root.'/'.$directory)) {
+                    mkdir($root.'/'.$directory, 0700, true);
+                }
+            }
+        }
+        $zip->close();
         $release = json_decode(file_get_contents($root.'/release.json'), true, 64, JSON_THROW_ON_ERROR);
-        $this->assertSame('1.0.0', $release['program']);
-        $this->assertSame('ea3d963d04587b6f544b274981fee2ba39603f9fa41b8feeeb588a68cd187956', hash_file('sha256', $root.'/app/Services/Updates/UpdateRunner.php'));
+        $this->assertSame($version, $release['program']);
+        if ($version === '1.0.0') {
+            $this->assertSame('ea3d963d04587b6f544b274981fee2ba39603f9fa41b8feeeb588a68cd187956', hash_file('sha256', $root.'/app/Services/Updates/UpdateRunner.php'));
+        }
 
         $database = config('database.connections.mysql');
         $this->assertSame(['127.0.0.1', 13368, 'image_vault_test'], [$database['host'], (int) $database['port'], $database['database']]);
@@ -318,7 +448,7 @@ PHP, [base_path('release/local-v1.0.3/image-vault-1.0.3-signed-update.zip'), bas
             'CACHE_STORE' => 'file', 'SESSION_DRIVER' => 'file', 'QUEUE_CONNECTION' => 'sync',
             'MAIL_MAILER' => 'array',
         ]);
-        $version = ['program' => '1.0.0', 'baseline' => '1.0.0', 'schema' => $release['schema'],
+        $version = ['program' => $version, 'baseline' => $version, 'schema' => $release['schema'],
             'managed_files' => $release['managed_files'], 'schema_fingerprint' => UpdateRunner::schemaFingerprint(DB::connection()->getPdo())];
         (new UpdateState($root))->write('version.json', $version);
         (new UpdateState($root))->write('connection.json', $database);
@@ -341,7 +471,7 @@ PHP, [base_path('release/local-v1.0.3/image-vault-1.0.3-signed-update.zip'), bas
     }
 
     /** @return array{status:string,stage:string,failure:?string,restored:?string,version:string,stages:list<string>,legacy_login_error:bool,asset_helper_error:bool} */
-    private function exercise(string $root, string $version, bool $restore): array
+    private function exercise(string $root, string $version, bool $restore, bool $failHealth = false): array
     {
         $probe = <<<'PHP'
 require $argv[1].'/vendor/autoload.php';
@@ -350,6 +480,9 @@ $status = $runner->prepare($argv[2]);
 $stages = [];
 for ($step = 0; $step < 8 && !in_array($status['status'], ['complete', 'failed'], true); $step++) {
     $stages[] = $status['stage'];
+    if ($argv[5] === 'fail-health' && $status['stage'] === 'health') {
+        file_put_contents($argv[1].'/vendor/autoload.php', '<?php throw new RuntimeException("Cross-version health failure fixture");');
+    }
     $status = $runner->advance($status['id'], $status['stage']);
 }
 $legacyLoginError = false;
@@ -366,9 +499,11 @@ $version = (new App\Services\Updates\UpdateState($argv[1]))->version();
 echo json_encode(['status' => $status['status'], 'stage' => $status['stage'], 'failure' => $status['error'] ?? null, 'restored' => $restored, 'version' => $version['program'], 'stages' => $stages, 'legacy_login_error' => $legacyLoginError, 'asset_helper_error' => $assetHelperError], JSON_THROW_ON_ERROR);
 PHP;
         $directory = in_array($version, ['1.0.3', '1.0.4', '1.0.5'], true) ? 'local-v'.$version : 'github-v'.$version;
-        $package = base_path('release/'.$directory.'/image-vault-'.$version.'-signed-update.zip');
+        $package = $version === '1.1.0'
+            ? base_path('release/20261113-v1.1.0-cross-version/image-vault-1.1.0-signed-update.zip')
+            : base_path('release/'.$directory.'/image-vault-'.$version.'-signed-update.zip');
 
-        return $this->phpProcess($root, $probe, [$root, $package, base_path('bin/php-local'), $restore ? 'restore' : 'upgrade']);
+        return $this->phpProcess($root, $probe, [$root, $package, base_path('bin/php-local'), $restore ? 'restore' : 'upgrade', $failHealth ? 'fail-health' : 'normal']);
     }
 
     /** @param list<string> $arguments
